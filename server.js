@@ -133,11 +133,12 @@ function formatAviationstackFlight(raw) {
       estimatedTime: raw.arrival?.estimated || raw.arrival?.scheduled
     },
     live: raw.live ? {
-      latitude: raw.live.latitude,
+      latitude:  raw.live.latitude,
       longitude: raw.live.longitude,
-      altitude: Math.round(raw.live.altitude * 3.281), // m → ft
-      speed: Math.round(raw.live.speed_horizontal * 0.539957), // km/h → knots
-      heading: raw.live.direction
+      altitude:  raw.live.altitude  != null ? Math.round(raw.live.altitude  * 3.281)    : null, // m → ft
+      speed:     raw.live.speed_horizontal != null ? Math.round(raw.live.speed_horizontal * 0.539957) : null, // km/h → knots
+      heading:   raw.live.direction,
+      is_ground: raw.live.is_ground ?? (raw.live.altitude != null && raw.live.altitude < 100 ? true : false),
     } : null,
     progress,
     demo: false
@@ -204,9 +205,10 @@ async function enrichWithOpenSky(flight) {
         if (pos && !pos.is_ground) {
           console.log(`[OpenSky] icao24 hit for ${flight.flightNumber}`);
           flight.live = pos;
-          // Recompute progress from actual GPS position
           const gcProgress = gcPositionFraction(flight.dep.lat, flight.dep.lon, flight.arr.lat, flight.arr.lon, pos.latitude, pos.longitude);
           if (gcProgress != null) flight.progress = gcProgress;
+          const eta = computeETA(pos.latitude, pos.longitude, flight.arr.lat, flight.arr.lon, pos.speed);
+          if (eta) flight.arr.estimatedTime = eta;
           return flight;
         }
       }
@@ -247,11 +249,10 @@ async function enrichWithOpenSky(flight) {
       if (pos && !pos.is_ground) {
         console.log(`[OpenSky] callsign match "${match[1].trim()}" for ${flight.flightNumber}`);
         flight.live = pos;
-        // Recompute progress from actual GPS position using great-circle projection
-        if (pos.latitude != null) {
-          const gcProgress = gcPositionFraction(depLat, depLon, arrLat, arrLon, pos.latitude, pos.longitude);
-          if (gcProgress != null) flight.progress = gcProgress;
-        }
+        const gcProgress = gcPositionFraction(depLat, depLon, arrLat, arrLon, pos.latitude, pos.longitude);
+        if (gcProgress != null) flight.progress = gcProgress;
+        const eta = computeETA(pos.latitude, pos.longitude, arrLat, arrLon, pos.speed);
+        if (eta) flight.arr.estimatedTime = eta;
       }
     } else {
       console.log(`[OpenSky] no callsign match for "${callsign}" in ${data.states.length} aircraft`);
@@ -261,6 +262,19 @@ async function enrichWithOpenSky(flight) {
   }
 
   return flight;
+}
+
+// Compute ETA from current GPS position + ground speed (knots) to destination
+function computeETA(curLat, curLon, arrLat, arrLon, speedKnots) {
+  if (!speedKnots || speedKnots < 50) return null; // ignore stale/parked data
+  const R = 3440.065; // Earth radius in nautical miles
+  const φ1 = curLat * Math.PI/180, φ2 = arrLat * Math.PI/180;
+  const Δφ = (arrLat - curLat) * Math.PI/180;
+  const Δλ = (arrLon - curLon) * Math.PI/180;
+  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+  const distNm = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const hoursRemaining = distNm / speedKnots;
+  return new Date(Date.now() + hoursRemaining * 3600000).toISOString();
 }
 
 // Project a GPS point onto the great-circle arc dep→arr, return 0–1 progress fraction
@@ -344,6 +358,17 @@ app.get('/api/flight/:number', async (req, res) => {
 
         // Enrich with real ADS-B position from OpenSky if AviationStack has no live data
         flight = await enrichWithOpenSky(flight);
+
+        // If we have live GPS (from either source) and the plane is airborne:
+        // • recompute progress from actual position (overrides stale time-based %)
+        // • recompute ETA from remaining distance ÷ current speed
+        if (flight.live && flight.live.is_ground === false && flight.dep.lat && flight.arr.lat) {
+          const gcp = gcPositionFraction(flight.dep.lat, flight.dep.lon, flight.arr.lat, flight.arr.lon, flight.live.latitude, flight.live.longitude);
+          if (gcp != null) flight.progress = gcp;
+          const eta = computeETA(flight.live.latitude, flight.live.longitude, flight.arr.lat, flight.arr.lon, flight.live.speed);
+          if (eta) flight.arr.estimatedTime = eta;
+          console.log(`[live] progress=${Math.round(flight.progress*100)}% ETA=${new Date(flight.arr.estimatedTime).toLocaleTimeString()}`);
+        }
 
         // Strip internal fields before sending to client
         delete flight._icao24;

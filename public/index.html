@@ -786,11 +786,14 @@ function tickCountdown(f) {
   const pad = n => String(Math.max(0,n)).padStart(2,'0');
 
   if (diff <= 0) {
-    const isActive = f.status === 'active' || f.status === 'en_route';
+    // Consider airborne if: status is active/en_route, OR live data confirms not on ground,
+    // OR status is 'scheduled' but we have live GPS (AviationStack mislabels in-flight as scheduled)
+    const isAirborne = ['active', 'en_route'].includes(f.status)
+      || (f.live && f.live.is_ground === false)
+      || (f.status === 'scheduled' && f.live);
     const title = document.getElementById('cdTitle');
     const grid  = document.getElementById('cdGrid');
-    if (isActive) {
-      // Flight is still in the air but ETA has passed — show DELAYED banner
+    if (isAirborne) {
       if (title) title.innerHTML = `<span style="color:var(--amber);letter-spacing:.05em">DELAYED</span> <span class="live-dot amber" style="margin-left:8px"></span>`;
       if (grid)  grid.style.opacity = '0.35';
     }
