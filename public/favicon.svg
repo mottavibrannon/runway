@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#0d1f3a"/>
+      <stop offset="100%" stop-color="#05080f"/>
+    </radialGradient>
+    <radialGradient id="glowGrad" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="32" height="32" rx="7" fill="url(#bgGrad)"/>
+
+  <!-- Ambient glow behind plane -->
+  <ellipse cx="16" cy="15" rx="10" ry="11" fill="url(#glowGrad)"/>
+
+  <!-- Airplane (top-down view, nose pointing up) -->
+  <g filter="url(#softGlow)">
+    <!-- Main fuselage -->
+    <path d="M16 3.5 C17.3 6 17.5 10 17.5 13 L17 22.5 C16.7 24 15.3 24 15 22.5 L14.5 13 C14.5 10 14.7 6 16 3.5 Z"
+          fill="#f0f9ff"/>
+
+    <!-- Left main wing -->
+    <path d="M14.5 11 L3 19.5 L4.5 21.5 L14.8 16.5 Z"
+          fill="#e0f2fe"/>
+
+    <!-- Right main wing -->
+    <path d="M17.5 11 L29 19.5 L27.5 21.5 L17.2 16.5 Z"
+          fill="#e0f2fe"/>
+
+    <!-- Left horizontal stabilizer -->
+    <path d="M15 22.5 L8 27.5 L9.5 28.5 L15.5 24 Z"
+          fill="#bae6fd"/>
+
+    <!-- Right horizontal stabilizer -->
+    <path d="M17 22.5 L24 27.5 L22.5 28.5 L16.5 24 Z"
+          fill="#bae6fd"/>
+
+    <!-- Engine pods -->
+    <ellipse cx="8.5" cy="18.5" rx="1.8" ry="2.8" fill="#93c5fd" opacity="0.9"/>
+    <ellipse cx="23.5" cy="18.5" rx="1.8" ry="2.8" fill="#93c5fd" opacity="0.9"/>
+  </g>
+
+  <!-- Cockpit window (blue accent) -->
+  <ellipse cx="16" cy="6.5" rx="1" ry="1.6" fill="#38bdf8" opacity="0.95"/>
+</svg>
