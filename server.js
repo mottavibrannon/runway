@@ -131,11 +131,44 @@ app.get('/api/flight/:number', async (req, res) => {
 
   if (process.env.AVIATIONSTACK_KEY) {
     try {
-      const url = `http://api.aviationstack.com/v1/flights?access_key=${process.env.AVIATIONSTACK_KEY}&flight_iata=${code}`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
-      const data = await response.json();
-      if (data.data && data.data.length > 0) {
-        const flight = enrichAirportCoords(formatAviationstackFlight(data.data[0]));
+      // AviationStack often mislabels in-flight planes as "scheduled".
+      // Use evidence-based scoring instead of trusting the status field:
+      //   0 = has live GPS coords → definitely airborne
+      //   1 = departed today + no arrival actual → in-air, departed today
+      //   2 = departed (any day) + no arrival actual → in-air
+      //   3 = status explicitly "active"
+      //   4 = departed today (any state)
+      //   5 = scheduled
+      //   6 = landed
+      //   7 = other
+      const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+      function scoreResult(f) {
+        const live      = f.live && f.live.latitude != null;
+        const depActual = f.departure?.actual || '';
+        const arrActual = f.arrival?.actual   || '';
+        const depToday  = depActual.startsWith(today);
+        const inAir     = depActual && !arrActual;
+
+        if (live)                            return 0;
+        if (depToday && inAir)               return 1;
+        if (inAir)                           return 2;
+        if (f.flight_status === 'active')    return 3;
+        if (depToday)                        return 4;
+        if (f.flight_status === 'scheduled') return 5;
+        if (f.flight_status === 'landed')    return 6;
+        return 7;
+      }
+
+      // Single call — fetch all statuses, then pick the best by evidence score
+      const allUrl = `http://api.aviationstack.com/v1/flights?access_key=${process.env.AVIATIONSTACK_KEY}&flight_iata=${code}&limit=10`;
+      const allRes = await fetch(allUrl, { signal: AbortSignal.timeout(8000) });
+      const allData = await allRes.json();
+
+      if (allData.data && allData.data.length > 0) {
+        const best = allData.data.slice().sort((a, b) => scoreResult(a) - scoreResult(b))[0];
+        console.log(`[flight] Best result for ${code}: score=${scoreResult(best)} status=${best.flight_status} dep=${best.departure?.iata}→${best.arrival?.iata} live=${!!(best.live?.latitude)}`);
+        const flight = enrichAirportCoords(formatAviationstackFlight(best));
         return res.json({ success: true, data: flight });
       }
     } catch (e) {
