@@ -1,6 +1,23 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const getAirportByIata = require('airport-data-js');
+
+// Airport coords cache — avoids repeat lookups for same IATA during a session
+const _airportCache = {};
+async function lookupAirport(iata) {
+  if (!iata) return null;
+  if (_airportCache[iata]) return _airportCache[iata];
+  try {
+    const results = await getAirportByIata.getAirportByIata(iata);
+    const apt = Array.isArray(results) ? results[0] : results;
+    if (apt?.latitude != null) {
+      _airportCache[iata] = { lat: apt.latitude, lon: apt.longitude, name: apt.airport, city: apt.time?.split('/').pop()?.replace(/_/g, ' ') || '' };
+      return _airportCache[iata];
+    }
+  } catch (_) {}
+  return null;
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -102,23 +119,15 @@ function formatAviationstackFlight(raw) {
   };
 }
 
-// ─── Airport coordinates lookup ───────────────────────────────────────────────
-const AIRPORT_COORDS = {
-  LHR: [51.477, -0.461], JFK: [40.641, -73.778], LAX: [33.942, -118.408],
-  SYD: [-33.946, 151.177], DXB: [25.253, 55.365], SFO: [37.619, -122.374],
-  EWR: [40.689, -74.174], ORD: [41.978, -87.904], ATL: [33.641, -84.427],
-  LGA: [40.777, -73.873], BOS: [42.365, -71.010], MIA: [25.796, -80.287],
-  CDG: [49.010, 2.547], FRA: [50.037, 8.562], AMS: [52.310, 4.768],
-  NRT: [35.765, 140.386], HKG: [22.309, 113.915], SIN: [1.359, 103.989],
-  DOH: [25.261, 51.614], ICN: [37.460, 126.440]
-};
-
-function enrichAirportCoords(flight) {
-  if (!flight.dep.lat && AIRPORT_COORDS[flight.dep.iata]) {
-    [flight.dep.lat, flight.dep.lon] = AIRPORT_COORDS[flight.dep.iata];
+// enrichAirportCoords — fills in lat/lon via airport-data-js (28k+ airports, cached)
+async function enrichAirportCoords(flight) {
+  if (!flight.dep.lat) {
+    const apt = await lookupAirport(flight.dep.iata);
+    if (apt) { flight.dep.lat = apt.lat; flight.dep.lon = apt.lon; if (!flight.dep.city) flight.dep.city = apt.city; }
   }
-  if (!flight.arr.lat && AIRPORT_COORDS[flight.arr.iata]) {
-    [flight.arr.lat, flight.arr.lon] = AIRPORT_COORDS[flight.arr.iata];
+  if (!flight.arr.lat) {
+    const apt = await lookupAirport(flight.arr.iata);
+    if (apt) { flight.arr.lat = apt.lat; flight.arr.lon = apt.lon; if (!flight.arr.city) flight.arr.city = apt.city; }
   }
   return flight;
 }
@@ -144,20 +153,22 @@ app.get('/api/flight/:number', async (req, res) => {
       const today = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
 
       function scoreResult(f) {
-        const live      = f.live && f.live.latitude != null;
+        const hasGPS    = f.live && f.live.latitude != null;
+        const airborne  = hasGPS && f.live.is_ground === false; // official best-practice signal
         const depActual = f.departure?.actual || '';
         const arrActual = f.arrival?.actual   || '';
         const depToday  = depActual.startsWith(today);
         const inAir     = depActual && !arrActual;
 
-        if (live)                            return 0;
-        if (depToday && inAir)               return 1;
-        if (inAir)                           return 2;
-        if (f.flight_status === 'active')    return 3;
-        if (depToday)                        return 4;
-        if (f.flight_status === 'scheduled') return 5;
-        if (f.flight_status === 'landed')    return 6;
-        return 7;
+        if (airborne)                        return 0; // GPS + confirmed not on ground
+        if (hasGPS)                          return 1; // GPS present (is_ground unknown)
+        if (depToday && inAir)               return 2; // departed today, not landed yet
+        if (inAir)                           return 3; // departed (any day), not landed
+        if (f.flight_status === 'active')    return 4; // status label alone
+        if (depToday)                        return 5; // departed today (landed or other)
+        if (f.flight_status === 'scheduled') return 6;
+        if (f.flight_status === 'landed')    return 7;
+        return 8;
       }
 
       // Single call — fetch all statuses, then pick the best by evidence score
@@ -168,7 +179,7 @@ app.get('/api/flight/:number', async (req, res) => {
       if (allData.data && allData.data.length > 0) {
         const best = allData.data.slice().sort((a, b) => scoreResult(a) - scoreResult(b))[0];
         console.log(`[flight] Best result for ${code}: score=${scoreResult(best)} status=${best.flight_status} dep=${best.departure?.iata}→${best.arrival?.iata} live=${!!(best.live?.latitude)}`);
-        const flight = enrichAirportCoords(formatAviationstackFlight(best));
+        const flight = await enrichAirportCoords(formatAviationstackFlight(best));
         return res.json({ success: true, data: flight });
       }
     } catch (e) {
