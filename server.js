@@ -185,8 +185,8 @@ function formatOpenSkyState(s) {
 }
 
 async function enrichWithOpenSky(flight) {
-  // Only enrich active flights that have no live position yet
-  if (flight.live || flight.status !== 'active') return flight;
+  // Enrich any flight that has no live position and isn't confirmed on the ground
+  if (flight.live || ['landed', 'cancelled', 'diverted'].includes(flight.status)) return flight;
 
   try {
     const osUser = process.env.OPENSKY_USER;
@@ -204,6 +204,9 @@ async function enrichWithOpenSky(flight) {
         if (pos && !pos.is_ground) {
           console.log(`[OpenSky] icao24 hit for ${flight.flightNumber}`);
           flight.live = pos;
+          // Recompute progress from actual GPS position
+          const gcProgress = gcPositionFraction(flight.dep.lat, flight.dep.lon, flight.arr.lat, flight.arr.lon, pos.latitude, pos.longitude);
+          if (gcProgress != null) flight.progress = gcProgress;
           return flight;
         }
       }
