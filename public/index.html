@@ -944,13 +944,40 @@ function renderLeave(f, locationDenied = false) {
     return;
   }
 
-  const distKm   = haversineKm(userLocation.lat, userLocation.lon, f.arr.lat, f.arr.lon);
-  const driveMins = Math.round(distKm / 55 * 60) + 30; // ~55 km/h avg + 30 min buffer
+  // Show card immediately with a loading state while we fetch real drive time
+  drawLeaveCard(f, null);
+  fetchDriveTime(userLocation, f.arr).then(driveMins => drawLeaveCard(f, driveMins));
+}
+
+async function fetchDriveTime(origin, arr) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/` +
+      `${origin.lon},${origin.lat};${arr.lon},${arr.lat}?overview=false`;
+    const res  = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    const data = await res.json();
+    if (data.code === 'Ok' && data.routes?.[0]) {
+      return Math.round(data.routes[0].duration / 60); // seconds → minutes
+    }
+  } catch (_) {}
+  // Fallback: haversine estimate if OSRM fails
+  const distKm = haversineKm(origin.lat, origin.lon, arr.lat, arr.lon);
+  return Math.round(distKm * 1.4 / 80 * 60); // road distance factor + highway speed
+}
+
+function drawLeaveCard(f, driveMins) {
+  const el = document.getElementById('leaveContent');
+  if (!el) return;
+
+  if (driveMins === null) {
+    el.innerHTML = `<div style="text-align:center;padding:20px 0;color:var(--t3);font-size:12px">Calculating drive time…</div>`;
+    return;
+  }
+
   const leaveAtMs = new Date(f.arr.estimatedTime).getTime() - driveMins * 60000;
   const minsLeft  = Math.round((leaveAtMs - Date.now()) / 60000);
 
   alertData.leaveAtMs = leaveAtMs;
-  alertData.sendAtMs  = leaveAtMs - 15 * 60000; // text 15 min before
+  alertData.sendAtMs  = leaveAtMs - 15 * 60000;
 
   const color = minsLeft < 0 ? 'var(--red)' : minsLeft < 30 ? 'var(--amber)' : 'var(--green)';
   const driveH = Math.floor(driveMins/60), driveM = driveMins % 60;
