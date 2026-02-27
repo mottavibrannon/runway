@@ -299,9 +299,10 @@
       position: fixed; inset: 0; z-index: 15;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       transition: opacity .4s ease;
+      pointer-events: none;
     }
-    #welcome.hide { opacity: 0; pointer-events: none; }
-    .welcome-inner { text-align: center; }
+    #welcome.hide { opacity: 0; }
+    .welcome-inner { text-align: center; pointer-events: all; }
     .welcome-title {
       font-size: 60px; font-weight: 900; letter-spacing: -4px; line-height: 0.95;
       margin-bottom: 10px;
