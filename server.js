@@ -446,6 +446,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// ─── Flight permalink route — serves the SPA, JS handles the URL ──────────────
+app.get('/flight/:number', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n🛫  Runway is running → http://localhost:${PORT}`);
