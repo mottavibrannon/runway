@@ -898,18 +898,30 @@ function renderMap(f) {
 
 // ── GEOLOCATION ───────────────────────────────────────────────────────────────
 function getUserLocation() {
+  // If we already have a location, render immediately — don't make the user wait again
+  if (userLocation) { renderLeave(currentFlight); return; }
+
   if (!navigator.geolocation) { renderLeave(null); return; }
+
   navigator.geolocation.getCurrentPosition(
     pos => {
       userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       renderLeave(currentFlight);
     },
     err => {
-      // PERMISSION_DENIED = 1, show a different message so user knows to check browser settings
-      const denied = err.code === 1;
-      renderLeave(null, denied);
+      if (err.code === 3) {
+        // TIMEOUT — retry once silently with a longer timeout before giving up
+        navigator.geolocation.getCurrentPosition(
+          pos => { userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude }; renderLeave(currentFlight); },
+          ()  => renderLeave(null, false),
+          { timeout: 20000, maximumAge: 300000 }
+        );
+      } else {
+        // PERMISSION_DENIED (1) or POSITION_UNAVAILABLE (2)
+        renderLeave(null, err.code === 1);
+      }
     },
-    { timeout: 8000, maximumAge: 120000 }
+    { timeout: 10000, maximumAge: 300000 }
   );
 }
 
