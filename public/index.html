@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Runway · Know When to Go</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;0,14..32,900;1,14..32,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #05080f;
+      --glass:        rgba(7, 11, 22, 0.88);
+      --glass-light:  rgba(255,255,255,0.04);
+      --glass-hover:  rgba(255,255,255,0.07);
+      --border:       rgba(255,255,255,0.07);
+      --border-hi:    rgba(255,255,255,0.13);
+      --blue:         #38bdf8;
+      --blue-dim:     rgba(56, 189, 248, 0.12);
+      --blue-glow:    rgba(56, 189, 248, 0.35);
+      --purple:       #818cf8;
+      --purple-dim:   rgba(129, 140, 248, 0.12);
+      --green:        #4ade80;
+      --green-dim:    rgba(74, 222, 128, 0.12);
+      --amber:        #fbbf24;
+      --amber-dim:    rgba(251, 191, 36, 0.12);
+      --red:          #f87171;
+      --red-dim:      rgba(248, 113, 113, 0.12);
+      --t1: #eef2ff;
+      --t2: #8b9ab8;
+      --t3: #3e4d67;
+    }
+
+    html, body { height: 100%; overflow: hidden; font-family: 'Inter', -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--t1); }
+
+    /* ── MAP ── */
+    #map {
+      position: fixed; inset: 0; z-index: 0;
+    }
+    .leaflet-control-attribution {
+      background: rgba(0,0,0,0.45) !important;
+      color: rgba(255,255,255,0.25) !important;
+      font-size: 10px !important;
+      border-radius: 6px 0 0 0 !important;
+    }
+    .leaflet-control-attribution a { color: rgba(255,255,255,0.3) !important; }
+    .leaflet-control-zoom a {
+      background: rgba(7,11,22,0.9) !important;
+      color: var(--t2) !important;
+      border-color: var(--border-hi) !important;
+    }
+    .leaflet-control-zoom a:hover { color: var(--t1) !important; }
+
+    /* ── MAP VIGNETTE ── */
+    #vignette {
+      position: fixed; inset: 0; z-index: 1; pointer-events: none;
+      background: radial-gradient(ellipse at 30% 50%, transparent 40%, rgba(5,8,15,0.7) 100%);
+    }
+
+    /* ── OVERLAY GRID ── */
+    #overlay {
+      position: fixed; inset: 0; z-index: 10;
+      display: grid;
+      grid-template-rows: 70px 1fr;
+      grid-template-columns: 360px 1fr;
+      pointer-events: none;
+    }
+    #overlay > * { pointer-events: all; }
+
+    /* ── TOP BAR ── */
+    #topbar {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; gap: 14px;
+      padding: 0 20px;
+      background: linear-gradient(to bottom, rgba(5,8,15,0.97) 0%, rgba(5,8,15,0.6) 85%, transparent 100%);
+    }
+
+    .logo { display: flex; align-items: center; gap: 10px; flex-shrink: 0; text-decoration: none; }
+    .logo-mark {
+      width: 34px; height: 34px;
+      background: linear-gradient(140deg, var(--blue) 0%, var(--purple) 100%);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 16px var(--blue-glow);
+    }
+    .logo-text { font-size: 19px; font-weight: 800; letter-spacing: -0.6px; color: var(--t1); }
+
+    .search-wrap {
+      flex: 1; max-width: 440px; position: relative;
+    }
+    .search-icon {
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      color: var(--t3); pointer-events: none; transition: color .2s;
+    }
+    .search-input {
+      width: 100%; height: 42px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border-hi);
+      border-radius: 12px;
+      color: var(--t1);
+      font-size: 14px; font-weight: 500;
+      padding: 0 14px 0 44px;
+      outline: none; font-family: inherit;
+      letter-spacing: 0.4px;
+      transition: all .25s;
+      backdrop-filter: blur(20px);
+    }
+    .search-input::placeholder { color: var(--t3); font-weight: 400; letter-spacing: 0; }
+    .search-input:focus {
+      background: rgba(255,255,255,0.09);
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px var(--blue-dim), 0 0 24px var(--blue-glow);
+    }
+    .search-input:focus ~ .search-icon { color: var(--blue); }
+
+    .btn-track {
+      height: 42px; padding: 0 18px;
+      background: var(--blue); color: #000;
+      border: none; border-radius: 12px;
+      font-size: 13px; font-weight: 800;
+      cursor: pointer; font-family: inherit;
+      letter-spacing: 0.2px; transition: all .2s;
+      white-space: nowrap;
+    }
+    .btn-track:hover {
+      background: #7dd3fc; transform: translateY(-1px);
+      box-shadow: 0 6px 22px var(--blue-glow);
+    }
+    .btn-track:active { transform: translateY(0); }
+
+    .mode-pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 12px;
+      background: var(--glass-light); border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 11px; font-weight: 600;
+      color: var(--t2); letter-spacing: 0.5px;
+      margin-left: auto; white-space: nowrap;
+    }
+    .live-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--blue); box-shadow: 0 0 5px var(--blue);
+      animation: pulse-dot 1.6s ease-in-out infinite;
+    }
+    .live-dot.amber { background: var(--amber); box-shadow: 0 0 5px var(--amber); }
+
+    /* ── LEFT PANEL ── */
+    #left-panel {
+      grid-row: 2; grid-column: 1;
+      padding: 8px 14px 20px;
+      display: flex; flex-direction: column; gap: 10px;
+      overflow-y: auto; max-height: calc(100vh - 70px);
+      scrollbar-width: none;
+    }
+    #left-panel::-webkit-scrollbar { display: none; }
+
+    /* ── GLASS CARD ── */
+    .card {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      backdrop-filter: blur(40px);
+      -webkit-backdrop-filter: blur(40px);
+      position: relative; overflow: hidden;
+      transition: border-color .2s;
+    }
+    .card::before {
+      content: ''; position: absolute; inset: 0; border-radius: 18px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.025) 0%, transparent 55%);
+      pointer-events: none;
+    }
+    .card-title {
+      font-size: 10px; font-weight: 700; color: var(--t3);
+      letter-spacing: 1px; text-transform: uppercase;
+      margin-bottom: 13px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+    /* ── FLIGHT CARD ── */
+    .flight-header {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; margin-bottom: 14px;
+    }
+    .airline-name { font-size: 11px; color: var(--t2); font-weight: 500; letter-spacing: 0.4px; margin-bottom: 3px; }
+    .flight-num { font-size: 26px; font-weight: 900; letter-spacing: -1px; color: var(--t1); }
+
+    .badge {
+      padding: 5px 11px; border-radius: 100px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
+    }
+    .badge-enroute  { background: var(--blue-dim);   color: var(--blue);   border: 1px solid rgba(56,189,248,.25); }
+    .badge-delayed  { background: var(--amber-dim);  color: var(--amber);  border: 1px solid rgba(251,191,36,.25); }
+    .badge-landed   { background: var(--green-dim);  color: var(--green);  border: 1px solid rgba(74,222,128,.25); }
+    .badge-cancelled{ background: var(--red-dim);    color: var(--red);    border: 1px solid rgba(248,113,113,.25); }
+    .badge-scheduled{ background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(129,140,248,.25); }
+
+    .route-row {
+      display: flex; align-items: center; gap: 0; margin-bottom: 14px;
+    }
+    .airport-block { flex: 1; }
+    .airport-block.right { text-align: right; }
+    .apt-code { font-size: 30px; font-weight: 900; letter-spacing: -1.5px; line-height: 1; }
+    .apt-city { font-size: 11px; color: var(--t2); margin-top: 2px; font-weight: 400; }
+    .apt-time { font-size: 12px; color: var(--t2); margin-top: 1px; font-weight: 500; }
+
+    .route-arrow {
+      flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 0 8px;
+    }
+    .route-arrow-line {
+      display: flex; align-items: center; width: 100%; gap: 4px;
+    }
+    .route-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--t3); flex-shrink: 0; }
+    .route-track {
+      flex: 1; height: 1px;
+      background: linear-gradient(to right, var(--t3), var(--blue), var(--t3));
+    }
+    .route-plane { font-size: 17px; flex-shrink: 0; }
+    .route-dur { font-size: 10px; color: var(--t3); font-weight: 500; letter-spacing: 0.3px; }
+
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 2px; }
+    .det {
+      background: var(--glass-light); border-radius: 11px; padding: 11px 12px;
+    }
+    .det-label { font-size: 9px; color: var(--t3); font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; margin-bottom: 3px; }
+    .det-val { font-size: 16px; font-weight: 800; letter-spacing: -0.4px; }
+    .det-unit { font-size: 10px; color: var(--t2); font-weight: 400; }
+
+    .progress-section { margin-top: 14px; }
+    .progress-meta { display: flex; justify-content: space-between; margin-bottom: 7px; }
+    .progress-meta span { font-size: 10px; color: var(--t3); font-weight: 500; }
+    .progress-track { height: 3px; background: rgba(255,255,255,0.05); border-radius: 100px; overflow: visible; position: relative; }
+    .progress-fill {
+      height: 100%; border-radius: 100px;
+      background: linear-gradient(to right, var(--blue), var(--purple));
+      transition: width 1.5s cubic-bezier(.4,0,.2,1);
+      position: relative;
+    }
+    .progress-fill::after {
+      content: ''; position: absolute; right: -4px; top: 50%; transform: translateY(-50%);
+      width: 9px; height: 9px; border-radius: 50%;
+      background: white; box-shadow: 0 0 0 2px rgba(56,189,248,.4), 0 0 10px var(--blue);
+    }
+
+    /* ── COUNTDOWN ── */
+    .cd-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+    .cd-unit {
+      background: var(--glass-light); border-radius: 12px;
+      padding: 12px 6px; text-align: center;
+    }
+    .cd-num {
+      font-size: 26px; font-weight: 900; letter-spacing: -1px;
+      color: var(--t1); line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .cd-lbl { font-size: 9px; color: var(--t3); font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; margin-top: 4px; }
+    .cd-arrival {
+      background: linear-gradient(135deg, var(--blue-dim), var(--purple-dim));
+      border: 1px solid rgba(56,189,248,.2);
+    }
+    .cd-arrival .cd-num { font-size: 12px; line-height: 1.4; color: var(--blue); font-weight: 700; letter-spacing: 0; }
+
+    /* ── LEAVE BY CARD ── */
+    .leave-display { text-align: center; margin: 6px 0 14px; }
+    .leave-time { font-size: 44px; font-weight: 900; letter-spacing: -2.5px; line-height: 1; }
+    .leave-sub { font-size: 12px; color: var(--t2); margin-top: 3px; }
+
+    .loc-row {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--glass-light); border-radius: 10px; padding: 9px 12px; margin-bottom: 10px;
+    }
+    .loc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); flex-shrink: 0; }
+    .loc-text { font-size: 12px; color: var(--t2); font-weight: 500; }
+
+    .btn-alert {
+      width: 100%; height: 46px;
+      background: linear-gradient(135deg, var(--blue-dim), var(--purple-dim));
+      border: 1px solid rgba(56,189,248,.25);
+      border-radius: 13px; color: var(--blue);
+      font-size: 13px; font-weight: 700; cursor: pointer;
+      font-family: inherit; letter-spacing: 0.2px;
+      display: flex; align-items: center; justify-content: center; gap: 7px;
+      transition: all .2s;
+    }
+    .btn-alert:hover {
+      background: linear-gradient(135deg, rgba(56,189,248,.2), rgba(129,140,248,.2));
+      border-color: var(--blue); transform: translateY(-1px);
+      box-shadow: 0 6px 22px var(--blue-dim);
+    }
+
+    /* ── WELCOME ── */
+    #welcome {
+      position: fixed; inset: 0; z-index: 15;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      transition: opacity .4s ease;
+    }
+    #welcome.hide { opacity: 0; pointer-events: none; }
+    .welcome-inner { text-align: center; }
+    .welcome-title {
+      font-size: 60px; font-weight: 900; letter-spacing: -4px; line-height: 0.95;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #eef2ff 0%, var(--blue) 50%, var(--purple) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .welcome-tag {
+      font-size: 16px; color: var(--t2); font-weight: 400; margin-bottom: 36px; letter-spacing: -0.2px;
+    }
+    .pills { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+    .pill {
+      padding: 10px 18px;
+      background: rgba(7,11,22,0.9);
+      border: 1px solid var(--border-hi); border-radius: 100px;
+      font-size: 13px; font-weight: 600; color: var(--t1);
+      cursor: pointer; backdrop-filter: blur(20px);
+      transition: all .2s; letter-spacing: 0.2px;
+    }
+    .pill:hover { background: var(--blue-dim); border-color: var(--blue); color: var(--blue); transform: translateY(-2px); }
+
+    /* ── MODAL ── */
+    .modal-bg {
+      position: fixed; inset: 0; z-index: 50;
+      background: rgba(5,8,15,0.82); backdrop-filter: blur(12px);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none; transition: opacity .3s;
+    }
+    .modal-bg.open { opacity: 1; pointer-events: all; }
+    .modal {
+      background: #0b1120; border: 1px solid var(--border-hi); border-radius: 22px;
+      padding: 30px; width: 370px; max-width: 92vw;
+      transform: translateY(20px) scale(.97); transition: transform .3s;
+      position: relative;
+    }
+    .modal-bg.open .modal { transform: translateY(0) scale(1); }
+    .modal-close {
+      position: absolute; top: 18px; right: 18px;
+      width: 30px; height: 30px; border-radius: 50%;
+      background: var(--glass-light); border: 1px solid var(--border);
+      color: var(--t2); cursor: pointer; font-size: 17px;
+      display: flex; align-items: center; justify-content: center; transition: all .15s;
+    }
+    .modal-close:hover { background: rgba(255,255,255,0.1); color: var(--t1); }
+    .modal-title { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 5px; }
+    .modal-sub { font-size: 13px; color: var(--t2); margin-bottom: 22px; line-height: 1.5; }
+
+    .phone-row { display: flex; gap: 7px; margin-bottom: 18px; }
+    .country-sel {
+      width: 78px; height: 48px;
+      background: var(--glass-light); border: 1px solid var(--border);
+      border-radius: 12px; color: var(--t1);
+      font-size: 17px; text-align: center; cursor: pointer; outline: none;
+      font-family: inherit; flex-shrink: 0;
+    }
+    .phone-inp {
+      flex: 1; height: 48px;
+      background: var(--glass-light); border: 1px solid var(--border);
+      border-radius: 12px; color: var(--t1);
+      font-size: 15px; font-weight: 500; padding: 0 14px; outline: none;
+      font-family: inherit; transition: border-color .2s;
+    }
+    .phone-inp:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-dim); }
+    .phone-inp::placeholder { color: var(--t3); }
+
+    .opt-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 20px; }
+    .opt {
+      display: flex; align-items: center; gap: 11px; padding: 13px 14px;
+      background: var(--glass-light); border: 1px solid var(--border); border-radius: 13px;
+      cursor: pointer; transition: all .15s;
+    }
+    .opt.sel { border-color: var(--blue); background: var(--blue-dim); }
+    .opt-radio {
+      width: 17px; height: 17px; border-radius: 50%; border: 2px solid var(--t3);
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+      transition: all .15s;
+    }
+    .opt.sel .opt-radio { border-color: var(--blue); background: var(--blue); }
+    .opt-dot { width: 6px; height: 6px; border-radius: 50%; background: #000; opacity: 0; transition: opacity .15s; }
+    .opt.sel .opt-dot { opacity: 1; }
+    .opt-title { font-size: 13px; font-weight: 600; }
+    .opt-desc  { font-size: 11px; color: var(--t2); margin-top: 1px; }
+
+    .btn-submit {
+      width: 100%; height: 50px;
+      background: linear-gradient(135deg, var(--blue), var(--purple));
+      border: none; border-radius: 13px; color: #000;
+      font-size: 14px; font-weight: 800; cursor: pointer;
+      font-family: inherit; letter-spacing: 0.2px; transition: all .2s;
+    }
+    .btn-submit:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(56,189,248,.4); }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeInUp    { from { opacity:0; transform: translateY(14px); } to { opacity:1; transform: translateY(0); } }
+    @keyframes fadeIn      { from { opacity:0; } to { opacity:1; } }
+    @keyframes pulse-dot   { 0%,100%{ opacity:1; } 50%{ opacity:.3; } }
+    @keyframes arr-pulse   { 0%,100%{ box-shadow: 0 0 8px var(--amber), 0 0 0 0 rgba(251,191,36,.4); } 50%{ box-shadow: 0 0 16px var(--amber), 0 0 0 8px rgba(251,191,36,0); } }
+    @keyframes plane-glow  { 0%,100%{ filter: drop-shadow(0 0 5px #38bdf8) drop-shadow(0 0 12px rgba(56,189,248,.6)); } 50%{ filter: drop-shadow(0 0 8px #38bdf8) drop-shadow(0 0 22px rgba(56,189,248,.9)); } }
+    @keyframes shimmer     { from{ background-position: 200% 0; } to{ background-position: -200% 0; } }
+    @keyframes star-twinkle{ 0%,100%{ opacity: var(--so1); } 50%{ opacity: var(--so2); } }
+
+    .anim-in { animation: fadeInUp .35s ease both; }
+    .anim-in:nth-child(1) { animation-delay: .04s; }
+    .anim-in:nth-child(2) { animation-delay: .09s; }
+    .anim-in:nth-child(3) { animation-delay: .14s; }
+    .anim-in:nth-child(4) { animation-delay: .19s; }
+
+    .shimmer-box {
+      background: linear-gradient(90deg, rgba(255,255,255,.03) 0%, rgba(255,255,255,.07) 50%, rgba(255,255,255,.03) 100%);
+      background-size: 200% 100%; animation: shimmer 1.4s ease infinite;
+      border-radius: 8px; height: 16px;
+    }
+
+    /* ── STAR FIELD ── */
+    .star {
+      position: fixed; border-radius: 50%; background: white;
+      animation: star-twinkle var(--sd) ease-in-out infinite;
+      animation-delay: var(--sdelay); z-index: 2; pointer-events: none;
+    }
+
+    /* ── TOAST ── */
+    #toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: rgba(7,11,22,.95); border: 1px solid var(--border-hi);
+      border-radius: 100px; padding: 10px 20px; font-size: 13px; font-weight: 500;
+      color: var(--t1); z-index: 60; opacity: 0; pointer-events: none;
+      transition: all .3s; backdrop-filter: blur(20px); white-space: nowrap;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    @media (max-width: 680px) {
+      #overlay { grid-template-columns: 1fr; grid-template-rows: 64px 1fr; }
+      #left-panel { grid-column: 1; max-height: 55vh; overflow-y: auto; }
+      .welcome-title { font-size: 42px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Map & vignette -->
+<div id="map"></div>
+<div id="vignette"></div>
+
+<!-- Overlay -->
+<div id="overlay">
+  <!-- Top bar -->
+  <div id="topbar">
+    <div class="logo">
+      <div class="logo-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+          <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/>
+        </svg>
+      </div>
+      <span class="logo-text">Runway</span>
+    </div>
+
+    <div class="search-wrap">
+      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+      </svg>
+      <input type="text" id="searchInput" class="search-input"
+        placeholder="Flight number — BA178, AA100, QF1…"
+        autocomplete="off" spellcheck="false">
+    </div>
+    <button class="btn-track" onclick="handleSearch()">Track</button>
+
+    <div class="mode-pill">
+      <span class="live-dot amber" id="modeDot"></span>
+      <span id="modeLabel">DEMO</span>
+    </div>
+  </div>
+
+  <!-- Left panel (populated by JS) -->
+  <div id="left-panel"></div>
+
+  <!-- Right (map shows through) -->
+  <div style="pointer-events:none"></div>
+</div>
+
+<!-- Welcome screen -->
+<div id="welcome">
+  <div class="welcome-inner">
+    <div class="welcome-title">Runway</div>
+    <div class="welcome-tag">Know exactly when to go.</div>
+    <div class="pills">
+      <div class="pill" onclick="trackFlight('BA178')">✈ BA 178 · London → New York</div>
+      <div class="pill" onclick="trackFlight('AA100')">✈ AA 100 · New York → Los Angeles</div>
+      <div class="pill" onclick="trackFlight('QF1')">✈ QF 1 · Sydney → Los Angeles</div>
+      <div class="pill" onclick="trackFlight('EK202')">✈ EK 202 · Dubai → New York</div>
+      <div class="pill" onclick="trackFlight('UA1')">✈ UA 1 · Newark → San Francisco</div>
+    </div>
+  </div>
+</div>
+
+<!-- SMS Modal -->
+<div class="modal-bg" id="smsModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <div class="modal-title">Set SMS Alert 📱</div>
+    <div class="modal-sub" id="modalSub">Get a text when it's time to leave for the airport.</div>
+
+    <div class="phone-row">
+      <select class="country-sel" id="cCode">
+        <option value="+1">🇺🇸 +1</option>
+        <option value="+44">🇬🇧 +44</option>
+        <option value="+61">🇦🇺 +61</option>
+        <option value="+971">🇦🇪 +971</option>
+        <option value="+33">🇫🇷 +33</option>
+        <option value="+49">🇩🇪 +49</option>
+        <option value="+81">🇯🇵 +81</option>
+        <option value="+65">🇸🇬 +65</option>
+      </select>
+      <input type="tel" class="phone-inp" id="phoneInp" placeholder="(555) 000-0000">
+    </div>
+
+    <div class="opt-list" id="optList">
+      <div class="opt sel" data-type="leave" onclick="pickOpt(this)">
+        <div class="opt-radio"><div class="opt-dot"></div></div>
+        <div><div class="opt-title">Alert me when to leave</div><div class="opt-desc">Based on your location & drive time</div></div>
+      </div>
+      <div class="opt" data-type="landing" onclick="pickOpt(this)">
+        <div class="opt-radio"><div class="opt-dot"></div></div>
+        <div><div class="opt-title">Alert when flight lands</div><div class="opt-desc">The moment wheels touch down</div></div>
+      </div>
+      <div class="opt" data-type="both_leave" onclick="pickOpt(this)">
+        <div class="opt-radio"><div class="opt-dot"></div></div>
+        <div><div class="opt-title">Both alerts</div><div class="opt-desc">Leave reminder + landing notification</div></div>
+      </div>
+    </div>
+
+    <button class="btn-submit" onclick="submitAlert()">Set Alert →</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ── STATE ────────────────────────────────────────────────────────────────────
+let MAP, planeMarker, pathDone, pathAhead, depMarker, arrMarker;
+let currentFlight = null, userLocation = null;
+let cdInterval = null, planeRaf = null;
+let alertData = { type: 'leave', sendAtMs: null, leaveAtMs: null };
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initMap();
+  spawnStars();
+  checkHealth();
+  document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') handleSearch(); });
+});
+
+// ── MAP ───────────────────────────────────────────────────────────────────────
+function initMap() {
+  MAP = L.map('map', { zoomControl: false, attributionControl: true, minZoom: 2, maxZoom: 13 })
+    .setView([25, -10], 3);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd', maxZoom: 19
+  }).addTo(MAP);
+
+  L.control.zoom({ position: 'bottomright' }).addTo(MAP);
+}
+
+// ── GREAT CIRCLE ──────────────────────────────────────────────────────────────
+function gcPoints(lat1, lon1, lat2, lon2, n = 120) {
+  const R2D = 180 / Math.PI, D2R = Math.PI / 180;
+  const φ1 = lat1*D2R, λ1 = lon1*D2R, φ2 = lat2*D2R, λ2 = lon2*D2R;
+  const d = 2*Math.asin(Math.sqrt(Math.sin((φ2-φ1)/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin((λ2-λ1)/2)**2));
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const f = i/n;
+    if (d === 0) { pts.push([lat1, lon1]); continue; }
+    const A = Math.sin((1-f)*d)/Math.sin(d), B = Math.sin(f*d)/Math.sin(d);
+    const x = A*Math.cos(φ1)*Math.cos(λ1) + B*Math.cos(φ2)*Math.cos(λ2);
+    const y = A*Math.cos(φ1)*Math.sin(λ1) + B*Math.cos(φ2)*Math.sin(λ2);
+    const z = A*Math.sin(φ1) + B*Math.sin(φ2);
+    pts.push([Math.atan2(z, Math.sqrt(x*x+y*y))*R2D, Math.atan2(y,x)*R2D]);
+  }
+  return pts;
+}
+
+function bearing(lat1, lon1, lat2, lon2) {
+  const D2R = Math.PI/180;
+  const φ1 = lat1*D2R, φ2 = lat2*D2R, Δλ = (lon2-lon1)*D2R;
+  return Math.atan2(Math.sin(Δλ)*Math.cos(φ2), Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ)) * 180/Math.PI;
+}
+
+// ── SEARCH ────────────────────────────────────────────────────────────────────
+async function handleSearch() {
+  const val = document.getElementById('searchInput').value.trim();
+  if (!val) return;
+  trackFlight(val);
+}
+
+async function trackFlight(code) {
+  document.getElementById('searchInput').value = code;
+  showLoading();
+
+  try {
+    const res = await fetch(`/api/flight/${encodeURIComponent(code)}`);
+    const json = await res.json();
+
+    if (!json.success) {
+      hideLoading();
+      flashError(json.hint || json.error || 'Flight not found');
+      return;
+    }
+
+    currentFlight = json.data;
+    hideWelcome();
+    hideLoading();
+    renderPanel(currentFlight);
+    renderMap(currentFlight);
+    getUserLocation();
+  } catch (e) {
+    hideLoading();
+    flashError('Could not reach the server. Is it running?');
+  }
+}
+
+// ── HEALTH CHECK ─────────────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const res = await fetch('/api/health');
+    const json = await res.json();
+    const dot = document.getElementById('modeDot');
+    const lbl = document.getElementById('modeLabel');
+    if (json.services?.flightData === 'live') {
+      dot.className = 'live-dot';
+      lbl.textContent = 'LIVE';
+    }
+  } catch (e) { /* server might be starting */ }
+}
+
+// ── RENDER PANEL ─────────────────────────────────────────────────────────────
+function fmtTime(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12: true });
+}
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric' });
+}
+function duration(f) {
+  const ms = new Date(f.arr.scheduledTime) - new Date(f.dep.scheduledTime);
+  const h = Math.floor(ms/3600000), m = Math.floor((ms%3600000)/60000);
+  return `${h}h ${m}m`;
+}
+function statusBadge(s) {
+  const map = { en_route:'enroute', active:'enroute', delayed:'delayed', landed:'landed', arrived:'landed', cancelled:'cancelled', scheduled:'scheduled' };
+  const cls = map[s] || 'scheduled';
+  const label = { enroute:'En Route', delayed:'Delayed', landed:'Landed', cancelled:'Cancelled', scheduled:'Scheduled' }[cls] || s;
+  return `<span class="badge badge-${cls}">${label}</span>`;
+}
+
+function renderPanel(f) {
+  const pct = f.progress != null ? Math.round(f.progress * 100) : 50;
+  const panel = document.getElementById('left-panel');
+
+  panel.innerHTML = `
+    <!-- FLIGHT INFO -->
+    <div class="card anim-in">
+      <div class="flight-header">
+        <div>
+          <div class="airline-name">${f.airline}</div>
+          <div class="flight-num">${f.flightNumber}</div>
+        </div>
+        ${statusBadge(f.status)}
+      </div>
+
+      <div class="route-row">
+        <div class="airport-block">
+          <div class="apt-code">${f.dep.iata}</div>
+          <div class="apt-city">${f.dep.city}</div>
+          <div class="apt-time">${fmtTime(f.dep.actualTime || f.dep.scheduledTime)}</div>
+        </div>
+        <div class="route-arrow">
+          <div class="route-arrow-line">
+            <div class="route-dot"></div>
+            <div class="route-track"></div>
+            <span class="route-plane">✈</span>
+            <div class="route-track" style="background: linear-gradient(to right,var(--t3),var(--t3))"></div>
+            <div class="route-dot"></div>
+          </div>
+          <div class="route-dur">${duration(f)}</div>
+        </div>
+        <div class="airport-block right">
+          <div class="apt-code">${f.arr.iata}</div>
+          <div class="apt-city">${f.arr.city}</div>
+          <div class="apt-time">${fmtTime(f.arr.estimatedTime)}</div>
+        </div>
+      </div>
+
+      <div class="detail-grid">
+        <div class="det">
+          <div class="det-label">Altitude</div>
+          <div class="det-val">${f.live ? f.live.altitude.toLocaleString() : '—'}<span class="det-unit"> ft</span></div>
+        </div>
+        <div class="det">
+          <div class="det-label">Speed</div>
+          <div class="det-val">${f.live ? f.live.speed : '—'}<span class="det-unit"> kt</span></div>
+        </div>
+        <div class="det">
+          <div class="det-label">Dep. Terminal</div>
+          <div class="det-val">${f.dep.terminal}</div>
+        </div>
+        <div class="det">
+          <div class="det-label">Arr. Terminal</div>
+          <div class="det-val">${f.arr.terminal}</div>
+        </div>
+      </div>
+
+      <div class="progress-section">
+        <div class="progress-meta">
+          <span>${f.dep.iata}</span>
+          <span>${pct}% complete</span>
+          <span>${f.arr.iata}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" style="width:${pct}%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- COUNTDOWN -->
+    <div class="card anim-in">
+      <div class="card-title">Arriving in <span class="live-dot" style="margin-left:8px"></span></div>
+      <div class="cd-grid">
+        <div class="cd-unit"><div class="cd-num" id="cdH">--</div><div class="cd-lbl">Hours</div></div>
+        <div class="cd-unit"><div class="cd-num" id="cdM">--</div><div class="cd-lbl">Mins</div></div>
+        <div class="cd-unit"><div class="cd-num" id="cdS">--</div><div class="cd-lbl">Secs</div></div>
+        <div class="cd-unit cd-arrival">
+          <div class="cd-num">${fmtDate(f.arr.estimatedTime)}<br><span style="font-size:10px;font-weight:500;color:var(--t2)">${fmtTime(f.arr.estimatedTime)}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AIRCRAFT -->
+    <div class="card anim-in">
+      <div class="card-title">Aircraft</div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:17px;font-weight:800;letter-spacing:-.3px">${f.aircraft}</div>
+          <div style="font-size:11px;color:var(--t2);margin-top:2px">${f.airline}</div>
+        </div>
+        <div style="font-size:42px;opacity:.12;line-height:1">✈</div>
+      </div>
+    </div>
+
+    <!-- LEAVE BY -->
+    <div class="card anim-in" id="leaveCard">
+      <div class="card-title">When to Leave</div>
+      <div id="leaveContent">
+        <div class="loc-row">
+          <div style="width:28px;height:28px;border-radius:50%;background:var(--blue-dim);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          </div>
+          <div style="font-size:12px;color:var(--t2)">Detecting your location…</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (cdInterval) clearInterval(cdInterval);
+  tickCountdown(f);
+  cdInterval = setInterval(() => tickCountdown(f), 1000);
+}
+
+function tickCountdown(f) {
+  const diff = new Date(f.arr.estimatedTime) - Date.now();
+  const pad = n => String(Math.max(0,n)).padStart(2,'0');
+  if (diff <= 0) {
+    ['cdH','cdM','cdS'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = '00'; });
+    return;
+  }
+  const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000), s = Math.floor((diff%60000)/1000);
+  const hEl = document.getElementById('cdH'), mEl = document.getElementById('cdM'), sEl = document.getElementById('cdS');
+  if (hEl) hEl.textContent = pad(h);
+  if (mEl) mEl.textContent = pad(m);
+  if (sEl) sEl.textContent = pad(s);
+}
+
+// ── RENDER MAP ────────────────────────────────────────────────────────────────
+function renderMap(f) {
+  if (planeMarker)  { planeMarker.remove();  planeMarker = null; }
+  if (pathDone)     { pathDone.remove();     pathDone = null; }
+  if (pathAhead)    { pathAhead.remove();    pathAhead = null; }
+  if (depMarker)    { depMarker.remove();    depMarker = null; }
+  if (arrMarker)    { arrMarker.remove();    arrMarker = null; }
+
+  const depLat = f.dep.lat, depLon = f.dep.lon;
+  const arrLat = f.arr.lat, arrLon = f.arr.lon;
+  if (!depLat || !arrLat) return;
+
+  const pts = gcPoints(depLat, depLon, arrLat, arrLon, 120);
+  const splitIdx = Math.round((f.progress || 0.5) * 120);
+
+  // Path: completed (bright) + ahead (dim dashed)
+  pathDone = L.polyline(pts.slice(0, splitIdx + 1), {
+    color: '#38bdf8', weight: 2.5, opacity: 0.75
+  }).addTo(MAP);
+
+  pathAhead = L.polyline(pts.slice(splitIdx), {
+    color: 'rgba(255,255,255,0.18)', weight: 1.5, dashArray: '5 9'
+  }).addTo(MAP);
+
+  // Airport markers
+  depMarker = L.marker([depLat, depLon], { icon: L.divIcon({
+    className: '', iconSize: [10,10], iconAnchor: [5,5],
+    html: `<div style="position:relative">
+      <div style="width:10px;height:10px;background:#4ade80;border-radius:50%;border:2px solid white;box-shadow:0 0 8px #4ade80"></div>
+      <div style="position:absolute;top:12px;left:50%;transform:translateX(-50%);white-space:nowrap;background:rgba(5,8,15,.85);color:#4ade80;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;font-family:Inter,sans-serif">${f.dep.iata}</div>
+    </div>`
+  })}).addTo(MAP);
+
+  arrMarker = L.marker([arrLat, arrLon], { icon: L.divIcon({
+    className: '', iconSize: [14,14], iconAnchor: [7,7],
+    html: `<div style="position:relative">
+      <div style="width:14px;height:14px;background:#fbbf24;border-radius:50%;border:2px solid white;animation:arr-pulse 2s ease-in-out infinite"></div>
+      <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);white-space:nowrap;background:rgba(5,8,15,.85);color:#fbbf24;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;font-family:Inter,sans-serif">${f.arr.iata}</div>
+    </div>`
+  })}).addTo(MAP);
+
+  // Plane
+  const planePt = pts[splitIdx] || [f.live?.latitude || depLat, f.live?.longitude || depLon];
+  const nextPt  = pts[Math.min(splitIdx + 1, 120)];
+  const b = bearing(planePt[0], planePt[1], nextPt[0], nextPt[1]);
+
+  planeMarker = L.marker(planePt, { icon: L.divIcon({
+    className: '', iconSize: [36,36], iconAnchor: [18,18],
+    html: `<svg id="planeSvg" width="36" height="36" viewBox="0 0 24 24" fill="#38bdf8"
+      style="transform:rotate(${b + 90}deg);filter:drop-shadow(0 0 6px #38bdf8) drop-shadow(0 0 14px rgba(56,189,248,.7));animation:plane-glow 2.5s ease-in-out infinite">
+      <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/>
+    </svg>`
+  }), zIndexOffset: 1000 }).addTo(MAP);
+
+  // Fit bounds
+  MAP.fitBounds(L.latLngBounds([[depLat, depLon],[arrLat, arrLon]]).pad(0.22), { animate: true, duration: 1 });
+
+  // Slow visual animation
+  animatePlane(pts, splitIdx);
+}
+
+function animatePlane(pts, startIdx) {
+  if (planeRaf) cancelAnimationFrame(planeRaf);
+  let idx = startIdx, lastT = 0;
+
+  function step(t) {
+    if (!planeMarker) return;
+    if (t - lastT > 200) { // update every 200ms for smooth but not frantic motion
+      lastT = t;
+      idx = Math.min(idx + 0.06, 119);
+      const i = Math.floor(idx);
+      const pt = pts[i], nxt = pts[Math.min(i+1, 120)];
+      if (pt) {
+        planeMarker.setLatLng(pt);
+        const b = bearing(pt[0], pt[1], nxt[0], nxt[1]);
+        const el = planeMarker.getElement();
+        if (el) {
+          const svg = el.querySelector('svg');
+          if (svg) svg.style.transform = `rotate(${b + 90}deg)`;
+        }
+      }
+    }
+    planeRaf = requestAnimationFrame(step);
+  }
+  planeRaf = requestAnimationFrame(step);
+}
+
+// ── GEOLOCATION ───────────────────────────────────────────────────────────────
+function getUserLocation() {
+  if (!navigator.geolocation) { renderLeave(null); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => { userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude }; renderLeave(currentFlight); },
+    ()  => renderLeave(null),
+    { timeout: 8000, maximumAge: 120000 }
+  );
+}
+
+function haversineKm(la1, lo1, la2, lo2) {
+  const R = 6371, D = Math.PI/180;
+  const dLa = (la2-la1)*D, dLo = (lo2-lo1)*D;
+  const a = Math.sin(dLa/2)**2 + Math.cos(la1*D)*Math.cos(la2*D)*Math.sin(dLo/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function renderLeave(f) {
+  const el = document.getElementById('leaveContent');
+  if (!el) return;
+
+  if (!userLocation || !f) {
+    el.innerHTML = `
+      <div style="text-align:center;padding:14px 0 4px">
+        <div style="font-size:26px;margin-bottom:8px">📍</div>
+        <div style="font-size:12px;color:var(--t2);line-height:1.6">Allow location access in your browser<br>to get a personalised leave-by time.</div>
+      </div>
+      <div style="margin-top:14px">
+        <button class="btn-alert" onclick="openModal()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Set SMS Alert
+        </button>
+      </div>`;
+    return;
+  }
+
+  const distKm   = haversineKm(userLocation.lat, userLocation.lon, f.arr.lat, f.arr.lon);
+  const driveMins = Math.round(distKm / 55 * 60) + 30; // ~55 km/h avg + 30 min buffer
+  const leaveAtMs = new Date(f.arr.estimatedTime).getTime() - driveMins * 60000;
+  const minsLeft  = Math.round((leaveAtMs - Date.now()) / 60000);
+
+  alertData.leaveAtMs = leaveAtMs;
+  alertData.sendAtMs  = leaveAtMs - 15 * 60000; // text 15 min before
+
+  const color = minsLeft < 0 ? 'var(--red)' : minsLeft < 30 ? 'var(--amber)' : 'var(--green)';
+  const driveH = Math.floor(driveMins/60), driveM = driveMins % 60;
+  const driveStr = driveH > 0 ? `${driveH}h ${driveM}m` : `${driveM}m`;
+  const leaveStr = new Date(leaveAtMs).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12: true });
+
+  el.innerHTML = `
+    <div class="leave-display">
+      <div class="leave-time" style="color:${color}">${leaveStr}</div>
+      <div class="leave-sub">${minsLeft > 0 ? `leave in ${minsLeft} min` : minsLeft === 0 ? 'leave now!' : 'you should have left already'}</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div class="det" style="flex:1;text-align:center">
+        <div class="det-label">Drive time</div>
+        <div class="det-val">${driveStr}</div>
+      </div>
+      <div class="det" style="flex:1;text-align:center">
+        <div class="det-label">Airport buffer</div>
+        <div class="det-val">30<span class="det-unit"> min</span></div>
+      </div>
+    </div>
+    <button class="btn-alert" onclick="openModal()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Text me at ${new Date(alertData.sendAtMs).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}
+    </button>`;
+}
+
+// ── MODAL ─────────────────────────────────────────────────────────────────────
+function openModal() {
+  if (currentFlight) {
+    document.getElementById('modalSub').textContent =
+      `Get a text when it's time to leave for ${currentFlight.arr.iata} (${currentFlight.arr.city}).`;
+  }
+  document.getElementById('smsModal').classList.add('open');
+}
+function closeModal() { document.getElementById('smsModal').classList.remove('open'); }
+
+function pickOpt(el) {
+  document.querySelectorAll('.opt').forEach(o => o.classList.remove('sel'));
+  el.classList.add('sel');
+  alertData.type = el.dataset.type;
+}
+
+async function submitAlert() {
+  const phone  = document.getElementById('phoneInp').value.trim();
+  const code   = document.getElementById('cCode').value;
+  const inp    = document.getElementById('phoneInp');
+
+  if (!phone) {
+    inp.style.borderColor = 'var(--red)';
+    setTimeout(() => inp.style.borderColor = '', 2000);
+    return;
+  }
+
+  const body = {
+    phone:       code + phone.replace(/\D/g, ''),
+    flightNumber: currentFlight?.flightNumber || '—',
+    sendAtMs:    alertData.sendAtMs || Date.now() + 60000,
+    type:        alertData.type,
+    arrivalCity: currentFlight?.arr?.city || 'the destination'
+  };
+
+  try {
+    const res  = await fetch('/api/alert', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const json = await res.json();
+
+    if (json.success) {
+      const modal = document.querySelector('.modal');
+      modal.innerHTML = `
+        <div style="text-align:center;padding:16px 0">
+          <div style="font-size:52px;margin-bottom:14px;animation:fadeInUp .4s ease">✅</div>
+          <div style="font-size:20px;font-weight:800;letter-spacing:-.5px;margin-bottom:8px">You're all set!</div>
+          <div style="font-size:13px;color:var(--t2);line-height:1.7;margin-bottom:20px">
+            We'll ${json.demo ? '<em>(would)</em> ' : ''}text <strong>${code} ${phone}</strong> when it's time to head to ${currentFlight?.arr?.city || 'the airport'}.
+            ${json.demo ? '<br><span style="color:var(--amber)">⚠ Running in demo mode — add Twilio credentials to send real SMS.</span>' : ''}
+          </div>
+          <button onclick="closeModal()" style="padding:12px 28px;background:var(--glass-light);border:1px solid var(--border);border-radius:11px;color:var(--t1);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Close</button>
+        </div>`;
+      setTimeout(closeModal, 6000);
+    } else {
+      showToast('❌ ' + (json.error || 'Something went wrong'));
+    }
+  } catch(e) {
+    showToast('❌ Could not connect to server');
+  }
+}
+
+// ── UI HELPERS ────────────────────────────────────────────────────────────────
+function showLoading() {
+  document.getElementById('left-panel').innerHTML = Array.from({length:3}, (_,i) =>
+    `<div class="card" style="animation-delay:${i*.07}s">
+      ${[60,40,80,50].map(w => `<div class="shimmer-box" style="width:${w}%;margin-bottom:10px"></div>`).join('')}
+    </div>`
+  ).join('');
+}
+function hideLoading() {}
+function hideWelcome() { document.getElementById('welcome').classList.add('hide'); }
+
+function flashError(msg) {
+  const inp = document.getElementById('searchInput');
+  inp.style.borderColor = 'var(--red)';
+  inp.style.boxShadow = '0 0 0 3px var(--red-dim)';
+  setTimeout(() => { inp.style.borderColor = ''; inp.style.boxShadow = ''; }, 2500);
+  showToast('✈ ' + msg);
+}
+
+function showToast(msg, dur = 3500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), dur);
+}
+
+// ── STARS ─────────────────────────────────────────────────────────────────────
+function spawnStars() {
+  for (let i = 0; i < 65; i++) {
+    const s = document.createElement('div');
+    const sz = Math.random() * 1.8 + 0.5;
+    const o1 = (Math.random() * 0.25 + 0.05).toFixed(2);
+    const o2 = Math.min(+(o1) + 0.3, 0.7).toFixed(2);
+    s.className = 'star';
+    s.style.cssText = `width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;--so1:${o1};--so2:${o2};--sd:${(Math.random()*4+2).toFixed(1)}s;--sdelay:${(Math.random()*5).toFixed(1)}s`;
+    document.body.appendChild(s);
+  }
+}
+</script>
+</body>
+</html>
