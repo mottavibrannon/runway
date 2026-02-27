@@ -3,6 +3,19 @@ const express = require('express');
 const path = require('path');
 const getAirportByIata = require('airport-data-js');
 
+// Derive a human-readable city from an airport's full name
+// e.g. "Austin-Bergstrom International Airport" → "Austin"
+//      "San Francisco International Airport"    → "San Francisco"
+function cityFromAirportName(name) {
+  if (!name) return '';
+  return name
+    .replace(/\s+(International|Intl\.?|Regional|Municipal|Metropolitan|Memorial|National|Executive|General|Commercial|Civil)\b.*$/i, '')
+    .replace(/[-–].*$/, '')   // strip hyphenated suffixes like "-Bergstrom"
+    .replace(/\s+Airport.*$/i, '')
+    .replace(/\bAirport\b.*$/i, '')
+    .trim();
+}
+
 // Airport coords cache — avoids repeat lookups for same IATA during a session
 const _airportCache = {};
 async function lookupAirport(iata) {
@@ -12,7 +25,12 @@ async function lookupAirport(iata) {
     const results = await getAirportByIata.getAirportByIata(iata);
     const apt = Array.isArray(results) ? results[0] : results;
     if (apt?.latitude != null) {
-      _airportCache[iata] = { lat: apt.latitude, lon: apt.longitude, name: apt.airport, city: apt.time?.split('/').pop()?.replace(/_/g, ' ') || '' };
+      _airportCache[iata] = {
+        lat: apt.latitude,
+        lon: apt.longitude,
+        name: apt.airport,
+        city: cityFromAirportName(apt.airport)
+      };
       return _airportCache[iata];
     }
   } catch (_) {}
@@ -82,17 +100,24 @@ function formatAviationstackFlight(raw) {
   const arrTime = raw.arrival?.estimated || raw.arrival?.scheduled;
   const totalMs = new Date(arrTime) - new Date(depTime);
   const elapsedMs = Date.now() - new Date(raw.departure?.actual || depTime);
-  const progress = totalMs > 0 ? Math.min(Math.max(elapsedMs / totalMs, 0), 1) : null;
+  let progress = totalMs > 0 ? Math.min(Math.max(elapsedMs / totalMs, 0), 1) : null;
+
+  // If the flight is still active (not landed) but the scheduled arrival has passed,
+  // the plane is delayed — don't show it at the destination (100%), cap at 90%.
+  if (raw.flight_status === 'active' && !raw.arrival?.actual && progress != null && progress >= 0.9) {
+    progress = 0.9;
+  }
 
   return {
     flightNumber: raw.flight?.iata || raw.flight?.icao || 'Unknown',
     airline: raw.airline?.name || 'Unknown',
-    aircraft: raw.aircraft?.iata || 'Unknown aircraft',
+    aircraft: raw.aircraft?.iata || raw.aircraft?.icao || null,
     status: raw.flight_status || 'unknown',
+    _icao24: raw.aircraft?.icao24 || null,       // used for OpenSky lookup, stripped before send
     dep: {
       iata: raw.departure?.iata,
       name: raw.departure?.airport,
-      city: (raw.departure?.timezone || '').split('/').pop()?.replace(/_/g, ' ') || '',
+      city: '',   // filled in by enrichAirportCoords via airport-data-js
       lat: null, lon: null,
       terminal: raw.departure?.terminal || 'N/A',
       scheduledTime: raw.departure?.scheduled,
@@ -101,7 +126,7 @@ function formatAviationstackFlight(raw) {
     arr: {
       iata: raw.arrival?.iata,
       name: raw.arrival?.airport,
-      city: (raw.arrival?.timezone || '').split('/').pop()?.replace(/_/g, ' ') || '',
+      city: '',   // filled in by enrichAirportCoords via airport-data-js
       lat: null, lon: null,
       terminal: raw.arrival?.terminal || 'N/A',
       scheduledTime: raw.arrival?.scheduled,
@@ -119,17 +144,149 @@ function formatAviationstackFlight(raw) {
   };
 }
 
-// enrichAirportCoords — fills in lat/lon via airport-data-js (28k+ airports, cached)
+// enrichAirportCoords — fills in lat/lon + city via airport-data-js (28k+ airports, cached)
 async function enrichAirportCoords(flight) {
-  if (!flight.dep.lat) {
-    const apt = await lookupAirport(flight.dep.iata);
-    if (apt) { flight.dep.lat = apt.lat; flight.dep.lon = apt.lon; if (!flight.dep.city) flight.dep.city = apt.city; }
-  }
-  if (!flight.arr.lat) {
-    const apt = await lookupAirport(flight.arr.iata);
-    if (apt) { flight.arr.lat = apt.lat; flight.arr.lon = apt.lon; if (!flight.arr.city) flight.arr.city = apt.city; }
-  }
+  const dep = await lookupAirport(flight.dep.iata);
+  if (dep) { flight.dep.lat = dep.lat; flight.dep.lon = dep.lon; flight.dep.city = dep.city; }
+
+  const arr = await lookupAirport(flight.arr.iata);
+  if (arr) { flight.arr.lat = arr.lat; flight.arr.lon = arr.lon; flight.arr.city = arr.city; }
+
   return flight;
+}
+
+// ─── OpenSky Network — live ADS-B position enrichment ────────────────────────
+// Maps airline IATA codes to ICAO operator codes used in ADS-B callsigns
+const AIRLINE_ICAO = {
+  AA:'AAL', UA:'UAL', DL:'DAL', WN:'SWA', B6:'JBU', AS:'ASA', NK:'NKS',
+  F9:'FFT', G4:'AAY', HA:'HAL', SY:'SCX', MX:'MXA', VX:'VRD', OO:'SKW',
+  BA:'BAW', LH:'DLH', AF:'AFR', KL:'KLM', EK:'UAE', QR:'QTR', SQ:'SIA',
+  CX:'CPA', JL:'JAL', NH:'ANA', KE:'KAL', OZ:'AAR', CA:'CCA', MU:'CES',
+  CZ:'CSN', QF:'QFA', NZ:'ANZ', TK:'THY', AY:'FIN', SK:'SAS', LX:'SWR',
+  OS:'AUA', IB:'IBE', VY:'VLG', FR:'RYR', U2:'EZY', EI:'EIN', TP:'TAP',
+  AC:'ACA', WS:'WJA', LO:'LOT', SN:'BEL', A3:'AEE', TG:'THA', MH:'MAS',
+  GA:'GIA', PR:'PAL', VN:'HVN', AI:'AIC', '6E':'IGO', SL:'RLX',
+};
+
+function formatOpenSkyState(s) {
+  // OpenSky state vector array positions:
+  // [0]icao24 [1]callsign [2]origin_country [3]time_position [4]last_contact
+  // [5]longitude [6]latitude [7]baro_altitude [8]on_ground [9]velocity
+  // [10]true_track [11]vertical_rate [12]sensors [13]geo_altitude
+  if (!s || s[5] == null || s[6] == null) return null;
+  return {
+    latitude:  s[6],
+    longitude: s[5],
+    altitude:  s[7]  != null ? Math.round(s[7]  * 3.281)    : null, // m → ft
+    speed:     s[9]  != null ? Math.round(s[9]  * 1.94384)  : null, // m/s → knots
+    heading:   s[10] != null ? Math.round(s[10])             : null,
+    is_ground: s[8],
+  };
+}
+
+async function enrichWithOpenSky(flight) {
+  // Only enrich active flights that have no live position yet
+  if (flight.live || flight.status !== 'active') return flight;
+
+  try {
+    const osUser = process.env.OPENSKY_USER;
+    const osPass = process.env.OPENSKY_PASS;
+    const auth   = osUser ? `${osUser}:${osPass}@` : '';
+    const base   = `https://${auth}opensky-network.org/api`;
+
+    // ── Strategy 1: direct ICAO24 lookup (most precise) ─────────────────────
+    if (flight._icao24) {
+      const url = `${base}/states/all?icao24=${flight._icao24.toLowerCase()}`;
+      const res  = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const data = await res.json();
+        const pos  = data.states?.length ? formatOpenSkyState(data.states[0]) : null;
+        if (pos && !pos.is_ground) {
+          console.log(`[OpenSky] icao24 hit for ${flight.flightNumber}`);
+          flight.live = pos;
+          return flight;
+        }
+      }
+    }
+
+    // ── Strategy 2: callsign search in route bounding box ───────────────────
+    const depLat = flight.dep.lat, depLon = flight.dep.lon;
+    const arrLat = flight.arr.lat, arrLon = flight.arr.lon;
+    if (!depLat || !arrLat) return flight;
+
+    // Build callsign: IATA airline code → ICAO operator + numeric portion
+    // e.g. "UA 1326" → "UAL1326 " (padded to 8 chars for ADS-B spec)
+    const iataAirline = flight.flightNumber.replace(/\s?\d+$/, '').trim(); // "UA"
+    const flightNum   = flight.flightNumber.replace(/[A-Z\s]/g, '');       // "1326"
+    const icaoOp      = AIRLINE_ICAO[iataAirline] || iataAirline;
+    const callsign    = (icaoOp + flightNum).substring(0, 8).toUpperCase();
+
+    // Pad bounding box by 3° to account for flight being off the direct route
+    const lamin = Math.min(depLat, arrLat) - 3;
+    const lamax = Math.max(depLat, arrLat) + 3;
+    const lomin = Math.min(depLon, arrLon) - 3;
+    const lomax = Math.max(depLon, arrLon) + 3;
+
+    const url = `${base}/states/all?lamin=${lamin}&lamax=${lamax}&lomin=${lomin}&lomax=${lomax}`;
+    const res  = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return flight;
+
+    const data = await res.json();
+    if (!data.states?.length) return flight;
+
+    // Find the state vector whose callsign matches ours
+    const match = data.states.find(s =>
+      s[1] && s[1].trim().toUpperCase().startsWith(callsign.trimEnd())
+    );
+
+    if (match) {
+      const pos = formatOpenSkyState(match);
+      if (pos && !pos.is_ground) {
+        console.log(`[OpenSky] callsign match "${match[1].trim()}" for ${flight.flightNumber}`);
+        flight.live = pos;
+        // Recompute progress from actual GPS position using great-circle projection
+        if (pos.latitude != null) {
+          const gcProgress = gcPositionFraction(depLat, depLon, arrLat, arrLon, pos.latitude, pos.longitude);
+          if (gcProgress != null) flight.progress = gcProgress;
+        }
+      }
+    } else {
+      console.log(`[OpenSky] no callsign match for "${callsign}" in ${data.states.length} aircraft`);
+    }
+  } catch (e) {
+    console.warn('[OpenSky] error:', e.message);
+  }
+
+  return flight;
+}
+
+// Project a GPS point onto the great-circle arc dep→arr, return 0–1 progress fraction
+function gcPositionFraction(depLat, depLon, arrLat, arrLon, pLat, pLon) {
+  try {
+    const R2D = 180 / Math.PI, D2R = Math.PI / 180;
+    // Convert to unit vectors
+    const toVec = (lat, lon) => {
+      const φ = lat * D2R, λ = lon * D2R;
+      return [Math.cos(φ)*Math.cos(λ), Math.cos(φ)*Math.sin(λ), Math.sin(φ)];
+    };
+    const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+    const norm = v => { const m = Math.sqrt(dot(v,v)); return [v[0]/m, v[1]/m, v[2]/m]; };
+
+    const A = toVec(depLat, depLon);
+    const B = toVec(arrLat, arrLon);
+    const P = toVec(pLat, pLon);
+
+    const totalAngle = Math.acos(Math.min(1, Math.max(-1, dot(A, B))));
+    if (totalAngle < 0.001) return null;
+
+    const AP = Math.acos(Math.min(1, Math.max(-1, dot(A, P))));
+    const fraction = AP / totalAngle;
+
+    return Math.min(0.98, Math.max(0.02, fraction)); // clamp to sane range
+  } catch (_) {
+    return null;
+  }
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
@@ -179,7 +336,15 @@ app.get('/api/flight/:number', async (req, res) => {
       if (allData.data && allData.data.length > 0) {
         const best = allData.data.slice().sort((a, b) => scoreResult(a) - scoreResult(b))[0];
         console.log(`[flight] Best result for ${code}: score=${scoreResult(best)} status=${best.flight_status} dep=${best.departure?.iata}→${best.arrival?.iata} live=${!!(best.live?.latitude)}`);
-        const flight = await enrichAirportCoords(formatAviationstackFlight(best));
+
+        let flight = await enrichAirportCoords(formatAviationstackFlight(best));
+
+        // Enrich with real ADS-B position from OpenSky if AviationStack has no live data
+        flight = await enrichWithOpenSky(flight);
+
+        // Strip internal fields before sending to client
+        delete flight._icao24;
+
         return res.json({ success: true, data: flight });
       }
     } catch (e) {

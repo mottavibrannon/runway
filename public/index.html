@@ -151,23 +151,32 @@
     /* ── LEFT PANEL ── */
     #left-panel {
       grid-row: 2; grid-column: 1;
-      padding: 8px 14px 20px;
-      display: flex; flex-direction: column; gap: 10px;
-      overflow-y: auto; max-height: calc(100vh - 70px);
+      padding: 8px 14px 0;
+      display: flex; flex-direction: column; gap: 8px;
+      overflow-y: auto; height: calc(100vh - 70px);
       scrollbar-width: none;
     }
     #left-panel::-webkit-scrollbar { display: none; }
+    /* Fade the last ~60px to signal scrollability */
+    #left-panel::after {
+      content: ''; display: block; flex-shrink: 0;
+      height: 60px; min-height: 60px;
+      background: linear-gradient(to bottom, transparent, rgba(5,8,15,0.85));
+      position: sticky; bottom: 0; pointer-events: none;
+      margin-top: -60px;
+    }
 
     /* ── GLASS CARD ── */
     .card {
       background: var(--glass);
       border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 18px;
+      border-radius: 16px;
+      padding: 14px 16px;
       backdrop-filter: blur(40px);
       -webkit-backdrop-filter: blur(40px);
       position: relative; overflow: hidden;
       transition: border-color .2s;
+      flex-shrink: 0;
     }
     .card::before {
       content: ''; position: absolute; inset: 0; border-radius: 18px;
@@ -729,8 +738,8 @@ function renderPanel(f) {
 
     <!-- COUNTDOWN -->
     <div class="card anim-in">
-      <div class="card-title">Arriving in <span class="live-dot" style="margin-left:8px"></span></div>
-      <div class="cd-grid">
+      <div class="card-title" id="cdTitle">Arriving in <span class="live-dot" style="margin-left:8px"></span></div>
+      <div class="cd-grid" id="cdGrid">
         <div class="cd-unit"><div class="cd-num" id="cdH">--</div><div class="cd-lbl">Hours</div></div>
         <div class="cd-unit"><div class="cd-num" id="cdM">--</div><div class="cd-lbl">Mins</div></div>
         <div class="cd-unit"><div class="cd-num" id="cdS">--</div><div class="cd-lbl">Secs</div></div>
@@ -740,6 +749,7 @@ function renderPanel(f) {
       </div>
     </div>
 
+    ${f.aircraft ? `
     <!-- AIRCRAFT -->
     <div class="card anim-in">
       <div class="card-title">Aircraft</div>
@@ -748,9 +758,9 @@ function renderPanel(f) {
           <div style="font-size:17px;font-weight:800;letter-spacing:-.3px">${f.aircraft}</div>
           <div style="font-size:11px;color:var(--t2);margin-top:2px">${f.airline}</div>
         </div>
-        <div style="font-size:42px;opacity:.12;line-height:1">✈</div>
+        <div style="font-size:38px;opacity:.10;line-height:1">✈</div>
       </div>
-    </div>
+    </div>` : ''}
 
     <!-- LEAVE BY -->
     <div class="card anim-in" id="leaveCard">
@@ -774,10 +784,28 @@ function renderPanel(f) {
 function tickCountdown(f) {
   const diff = new Date(f.arr.estimatedTime) - Date.now();
   const pad = n => String(Math.max(0,n)).padStart(2,'0');
+
   if (diff <= 0) {
+    const isActive = f.status === 'active' || f.status === 'en_route';
+    const title = document.getElementById('cdTitle');
+    const grid  = document.getElementById('cdGrid');
+    if (isActive) {
+      // Flight is still in the air but ETA has passed — show DELAYED banner
+      if (title) title.innerHTML = `<span style="color:var(--amber);letter-spacing:.05em">DELAYED</span> <span class="live-dot amber" style="margin-left:8px"></span>`;
+      if (grid)  grid.style.opacity = '0.35';
+    }
     ['cdH','cdM','cdS'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = '00'; });
     return;
   }
+
+  // Reset title/opacity if it was previously showing DELAYED
+  const title = document.getElementById('cdTitle');
+  const grid  = document.getElementById('cdGrid');
+  if (title && !title.querySelector('.live-dot.amber')) {
+    title.innerHTML = `Arriving in <span class="live-dot" style="margin-left:8px"></span>`;
+  }
+  if (grid) grid.style.opacity = '1';
+
   const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000), s = Math.floor((diff%60000)/1000);
   const hEl = document.getElementById('cdH'), mEl = document.getElementById('cdM'), sEl = document.getElementById('cdS');
   if (hEl) hEl.textContent = pad(h);
