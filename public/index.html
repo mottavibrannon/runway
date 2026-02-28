@@ -547,6 +547,11 @@
 // ── STATE ────────────────────────────────────────────────────────────────────
 let MAP, planeMarker, pathDone, pathAhead, depMarker, arrMarker;
 let currentFlight = null, userLocation = null;
+let userLocationError = null;
+let isLocatingUser = false;
+let geolocationWatchId = null;
+let geolocationPermissionStatus = null;
+let geolocationRequestInFlight = false;
 let cdInterval = null;
 let alertData = { type: 'leave', sendAtMs: null, leaveAtMs: null };
 
@@ -555,6 +560,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initMap();
   spawnStars();
   checkHealth();
+  setupGeolocationPermissionListener();
   document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') handleSearch(); });
 
   // Load flight from URL if visiting /flight/XXXX directly
@@ -572,6 +578,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('searchInput').value = '';
       showWelcome();
       clearMap();
+      stopUserLocationWatch();
     }
   });
 });
@@ -939,31 +946,127 @@ function renderMap(f) {
 
 // ── GEOLOCATION ───────────────────────────────────────────────────────────────
 function getUserLocation() {
-  // If we already have a location, render immediately — don't make the user wait again
-  if (userLocation) { renderLeave(currentFlight); return; }
+  if (!navigator.geolocation) {
+    userLocationError = 'unsupported';
+    isLocatingUser = false;
+    renderLeave(currentFlight);
+    return;
+  }
 
-  if (!navigator.geolocation) { renderLeave(null); return; }
+  startUserLocationWatch();
+
+  const hasFreshLocation = userLocation && (Date.now() - userLocation.timestamp) < 60000;
+  if (hasFreshLocation) {
+    userLocationError = null;
+    isLocatingUser = false;
+    renderLeave(currentFlight);
+    return;
+  }
+
+  if (geolocationRequestInFlight) {
+    isLocatingUser = true;
+    renderLeave(currentFlight);
+    return;
+  }
+
+  isLocatingUser = true;
+  userLocationError = null;
+  geolocationRequestInFlight = true;
+  renderLeave(currentFlight);
 
   navigator.geolocation.getCurrentPosition(
     pos => {
-      userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-      renderLeave(currentFlight);
+      geolocationRequestInFlight = false;
+      applyUserLocation(pos);
     },
     err => {
+      geolocationRequestInFlight = false;
+
       if (err.code === 3) {
-        // TIMEOUT — retry once silently with a longer timeout before giving up
         navigator.geolocation.getCurrentPosition(
-          pos => { userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude }; renderLeave(currentFlight); },
-          ()  => renderLeave(null, false),
-          { timeout: 20000, maximumAge: 300000 }
+          pos => applyUserLocation(pos),
+          retryErr => handleUserLocationError(retryErr),
+          { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 }
         );
-      } else {
-        // PERMISSION_DENIED (1) or POSITION_UNAVAILABLE (2)
-        renderLeave(null, err.code === 1);
+        return;
+      }
+
+      handleUserLocationError(err);
+    },
+    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+  );
+}
+
+function applyUserLocation(pos) {
+  userLocation = {
+    lat: pos.coords.latitude,
+    lon: pos.coords.longitude,
+    accuracy: pos.coords.accuracy,
+    timestamp: pos.timestamp || Date.now()
+  };
+  userLocationError = null;
+  isLocatingUser = false;
+  renderLeave(currentFlight);
+}
+
+function handleUserLocationError(err) {
+  if (err.code === 1) {
+    userLocationError = 'denied';
+    stopUserLocationWatch();
+  } else if (!userLocation) {
+    userLocationError = err.code === 2 ? 'unavailable' : 'timeout';
+  }
+
+  isLocatingUser = false;
+  renderLeave(currentFlight);
+}
+
+function startUserLocationWatch() {
+  if (!navigator.geolocation || geolocationWatchId !== null) return;
+
+  geolocationWatchId = navigator.geolocation.watchPosition(
+    pos => applyUserLocation(pos),
+    err => {
+      if (err.code === 1) {
+        handleUserLocationError(err);
+      } else if (!userLocation) {
+        userLocationError = err.code === 2 ? 'unavailable' : 'timeout';
+        isLocatingUser = false;
+        renderLeave(currentFlight);
       }
     },
-    { timeout: 10000, maximumAge: 300000 }
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 30000 }
   );
+}
+
+function stopUserLocationWatch() {
+  if (geolocationWatchId !== null && navigator.geolocation) {
+    navigator.geolocation.clearWatch(geolocationWatchId);
+  }
+  geolocationWatchId = null;
+  geolocationRequestInFlight = false;
+  isLocatingUser = false;
+}
+
+async function setupGeolocationPermissionListener() {
+  if (!navigator.permissions?.query) return;
+
+  try {
+    geolocationPermissionStatus = await navigator.permissions.query({ name: 'geolocation' });
+    geolocationPermissionStatus.onchange = () => {
+      if (geolocationPermissionStatus.state === 'granted') {
+        userLocationError = null;
+        getUserLocation();
+      } else if (geolocationPermissionStatus.state === 'denied') {
+        userLocation = null;
+        userLocationError = 'denied';
+        stopUserLocationWatch();
+        renderLeave(currentFlight);
+      }
+    };
+  } catch (_) {
+    geolocationPermissionStatus = null;
+  }
 }
 
 function haversineKm(la1, lo1, la2, lo2) {
@@ -973,7 +1076,7 @@ function haversineKm(la1, lo1, la2, lo2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function renderLeave(f, locationDenied = false) {
+function renderLeave(f, locationDenied = userLocationError === 'denied') {
   const el = document.getElementById('leaveContent');
   if (!el) return;
 
@@ -1012,17 +1115,25 @@ function renderLeave(f, locationDenied = false) {
   }
 
   if (!userLocation || !f) {
-    const msg    = locationDenied
+    const msg = locationDenied
       ? 'Location access was blocked.<br>Enable it in your browser settings.'
-      : 'Share your location to get<br>a personalised leave-by time.';
+      : isLocatingUser
+        ? 'Getting your current location…<br>This can take a few seconds.'
+        : userLocationError === 'timeout'
+          ? 'We could not lock your location in time.<br>Try again or move near a window.'
+          : userLocationError === 'unavailable'
+            ? 'Your device could not determine a location.<br>Check signal, then try again.'
+            : userLocationError === 'unsupported'
+              ? 'This browser does not support location access.'
+              : 'Share your location to get<br>a personalised leave-by time.';
     el.innerHTML = `
       <div style="text-align:center;padding:10px 0 4px">
         <div style="font-size:24px;margin-bottom:6px">📍</div>
         <div style="font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:12px">${msg}</div>
-        ${!locationDenied ? `
+        ${!locationDenied && userLocationError !== 'unsupported' ? `
         <button class="btn-alert" style="margin-bottom:8px" onclick="getUserLocation()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
-          Share My Location
+          ${isLocatingUser ? 'Refreshing Location…' : 'Share My Location'}
         </button>` : ''}
         <button class="btn-alert" onclick="openModal()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
