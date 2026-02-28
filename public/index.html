@@ -13,6 +13,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
+      --topbar-h:     70px;
       --bg:           #05080f;
       --glass:        rgba(7, 11, 22, 0.88);
       --glass-light:  rgba(255,255,255,0.04);
@@ -66,7 +67,7 @@
     #overlay {
       position: fixed; inset: 0; z-index: 10;
       display: grid;
-      grid-template-rows: 70px 1fr;
+      grid-template-rows: var(--topbar-h) 1fr;
       grid-template-columns: 360px 1fr;
       pointer-events: none;
     }
@@ -154,7 +155,7 @@
       grid-row: 2; grid-column: 1;
       padding: 8px 14px 0;
       display: flex; flex-direction: column; gap: 8px;
-      overflow-y: auto; height: calc(100vh - 70px);
+      overflow-y: auto; height: calc(100dvh - var(--topbar-h));
       scrollbar-width: none;
     }
     #left-panel::-webkit-scrollbar { display: none; }
@@ -437,9 +438,62 @@
     #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
     @media (max-width: 680px) {
-      #overlay { grid-template-columns: 1fr; grid-template-rows: 64px 1fr; }
-      #left-panel { grid-column: 1; max-height: 55vh; overflow-y: auto; }
+      :root { --topbar-h: 112px; }
+      html, body { overflow: hidden; }
+      #overlay {
+        grid-template-columns: 1fr;
+        grid-template-rows: var(--topbar-h) minmax(0, 1fr);
+      }
+      #topbar {
+        padding: 12px 14px;
+        gap: 10px;
+        align-content: flex-start;
+        flex-wrap: wrap;
+      }
+      .logo { order: 1; }
+      .mode-pill { order: 2; margin-left: auto; }
+      .search-wrap {
+        order: 3;
+        flex: 1 1 calc(100% - 92px);
+        max-width: none;
+        min-width: 0;
+      }
+      .btn-track {
+        order: 4;
+        flex: 0 0 82px;
+        padding: 0 14px;
+      }
+      #left-panel {
+        grid-column: 1;
+        width: 100%;
+        height: calc(100dvh - var(--topbar-h));
+        min-height: 0;
+        padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 12px);
+      }
+      .card { border-radius: 15px; }
+      .flight-header { gap: 10px; }
+      .flight-num { font-size: 24px; }
+      .apt-code { font-size: 26px; }
+      .detail-grid,
+      .cd-grid { grid-template-columns: 1fr 1fr; }
+      .leave-time { font-size: 38px; letter-spacing: -2px; }
       .welcome-title { font-size: 42px; }
+      .welcome-tag {
+        font-size: 14px;
+        margin-bottom: 26px;
+        padding: 0 18px;
+      }
+      .welcome-inner { padding: 0 16px; }
+      .pills { gap: 10px; }
+      .pill {
+        width: 100%;
+        max-width: 360px;
+      }
+      #toast {
+        width: min(92vw, 420px);
+        white-space: normal;
+        text-align: center;
+      }
     }
   </style>
 </head>
