@@ -806,16 +806,29 @@ function tickCountdown(f) {
   const pad = n => String(Math.max(0,n)).padStart(2,'0');
 
   if (diff <= 0) {
-    // Consider airborne if: status is active/en_route, OR live data confirms not on ground,
+    const isLanded   = ['landed', 'arrived'].includes(f.status);
     const isAirborne = ['active', 'en_route'].includes(f.status)
       || (f.live && f.live.is_ground === false);
     const title = document.getElementById('cdTitle');
     const grid  = document.getElementById('cdGrid');
-    if (isAirborne) {
+    if (isLanded) {
+      // Replace the countdown entirely — time-remaining is no longer meaningful
+      if (title) title.innerHTML = `Arrived`;
+      if (grid) grid.innerHTML = `
+        <div style="grid-column:1/-1;text-align:center;padding:10px 0 6px">
+          <div style="font-size:38px;margin-bottom:8px">✅</div>
+          <div style="font-size:22px;font-weight:900;letter-spacing:-0.8px;color:var(--green)">
+            ${fmtTime(f.arr.estimatedTime)}
+          </div>
+          <div style="font-size:12px;color:var(--t2);margin-top:4px;font-weight:500">
+            Landed · ${f.arr.iata}${f.arr.city ? ' · ' + f.arr.city : ''}
+          </div>
+        </div>`;
+    } else if (isAirborne) {
       if (title) title.innerHTML = `<span style="color:var(--amber);letter-spacing:.05em">DELAYED</span> <span class="live-dot amber" style="margin-left:8px"></span>`;
       if (grid)  grid.style.opacity = '0.35';
+      ['cdH','cdM','cdS'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = '00'; });
     }
-    ['cdH','cdM','cdS'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = '00'; });
     return;
   }
 
@@ -846,20 +859,48 @@ function renderMap(f) {
   const arrLat = f.arr.lat, arrLon = f.arr.lon;
   if (!depLat || !arrLat) return;
 
-  // Use live GPS as the pivot point if available, otherwise estimate from progress
+  // Determine pivot point based on flight state — avoid the JS falsy 0||0.5 trap
   const hasLive = f.live?.latitude != null;
-  const planePt = hasLive
-    ? [f.live.latitude, f.live.longitude]
-    : gcPoints(depLat, depLon, arrLat, arrLon, 100)[Math.round((f.progress || 0.5) * 100)];
+  const isLandedState    = ['landed', 'arrived'].includes(f.status);
+  const isScheduledState = ['scheduled', 'cancelled'].includes(f.status);
+  let planePt;
+  if (isLandedState) {
+    // Plane is on the ground at the destination
+    planePt = [arrLat, arrLon];
+  } else if (!hasLive && isScheduledState) {
+    // Hasn't departed — park at the departure gate
+    planePt = [depLat, depLon];
+  } else {
+    // Active / en-route: prefer live GPS, fall back to progress estimate
+    // NOTE: must use != null check (not ||) so progress=0 doesn't default to 0.5
+    const progressPct = f.progress != null ? f.progress : 0.5;
+    planePt = hasLive
+      ? [f.live.latitude, f.live.longitude]
+      : gcPoints(depLat, depLon, arrLat, arrLon, 100)[Math.round(progressPct * 100)];
+  }
 
-  // Path: great-circle arcs through the real plane position
-  pathDone = L.polyline(gcPoints(depLat, depLon, planePt[0], planePt[1], 60), {
-    color: '#38bdf8', weight: 2.5, opacity: 0.75
-  }).addTo(MAP);
-
-  pathAhead = L.polyline(gcPoints(planePt[0], planePt[1], arrLat, arrLon, 60), {
-    color: 'rgba(255,255,255,0.18)', weight: 1.5, dashArray: '5 9'
-  }).addTo(MAP);
+  // Path: great-circle arcs — full route dashed for scheduled, split done/ahead for active
+  if (isScheduledState) {
+    // Entire route shown as dashed (not yet flown)
+    pathDone  = L.polyline(gcPoints(depLat, depLon, arrLat, arrLon, 60), {
+      color: 'rgba(255,255,255,0.18)', weight: 1.5, dashArray: '5 9'
+    }).addTo(MAP);
+    pathAhead = pathDone; // reuse reference so cleanup works
+  } else if (isLandedState) {
+    // Entire route shown as solid (fully flown)
+    pathDone  = L.polyline(gcPoints(depLat, depLon, arrLat, arrLon, 60), {
+      color: '#38bdf8', weight: 2.5, opacity: 0.55
+    }).addTo(MAP);
+    pathAhead = pathDone;
+  } else {
+    // Split: completed arc in blue, remaining in dashed white
+    pathDone  = L.polyline(gcPoints(depLat, depLon, planePt[0], planePt[1], 60), {
+      color: '#38bdf8', weight: 2.5, opacity: 0.75
+    }).addTo(MAP);
+    pathAhead = L.polyline(gcPoints(planePt[0], planePt[1], arrLat, arrLon, 60), {
+      color: 'rgba(255,255,255,0.18)', weight: 1.5, dashArray: '5 9'
+    }).addTo(MAP);
+  }
 
   // Airport markers
   depMarker = L.marker([depLat, depLon], { icon: L.divIcon({
@@ -935,6 +976,40 @@ function haversineKm(la1, lo1, la2, lo2) {
 function renderLeave(f, locationDenied = false) {
   const el = document.getElementById('leaveContent');
   if (!el) return;
+
+  // Flight has landed — switch to pickup mode
+  if (f && ['landed', 'arrived'].includes(f.status)) {
+    if (!userLocation) {
+      el.innerHTML = `
+        <div style="text-align:center;padding:10px 0 4px">
+          <div style="font-size:13px;font-weight:700;color:var(--green);margin-bottom:6px">✅ Flight has landed!</div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.6;margin-bottom:12px">Share your location to get<br>pickup drive time.</div>
+          ${!locationDenied ? `
+          <button class="btn-alert" onclick="getUserLocation()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+            Share My Location
+          </button>` : `<div style="font-size:11px;color:var(--t3)">Enable location in browser settings.</div>`}
+        </div>`;
+      return;
+    }
+    // Has location — show drive time to arrival airport for pickup
+    drawPickupCard(f, null);
+    fetchDriveTime(userLocation, f.arr).then(driveMins => drawPickupCard(f, driveMins));
+    return;
+  }
+
+  // Departure is more than 24 h away — too early to be actionable
+  if (f) {
+    const hoursUntilDep = (new Date(f.dep.scheduledTime).getTime() - Date.now()) / 3600000;
+    if (hoursUntilDep > 24) {
+      el.innerHTML = `
+        <div style="text-align:center;padding:14px 0 8px">
+          <div style="font-size:26px;margin-bottom:8px">🕐</div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.6">Check back closer to departure<br>for a personalised leave-by time.</div>
+        </div>`;
+      return;
+    }
+  }
 
   if (!userLocation || !f) {
     const msg    = locationDenied
@@ -1022,6 +1097,50 @@ function drawLeaveCard(f, driveMins) {
         Get Directions
       </button>
     </div>`;
+}
+
+function drawPickupCard(f, driveMins) {
+  const el = document.getElementById('leaveContent');
+  if (!el) return;
+
+  const landedAt   = new Date(f.arr.estimatedTime);
+  const minsAgo    = Math.round((Date.now() - landedAt.getTime()) / 60000);
+  const agoStr     = minsAgo <= 1 ? 'just now' : `${minsAgo} min ago`;
+
+  if (driveMins === null) {
+    el.innerHTML = `<div style="text-align:center;padding:20px 0;color:var(--t3);font-size:12px">Calculating drive time…</div>`;
+    return;
+  }
+
+  const leaveAtMs  = Date.now(); // leave now — flight is already down
+  const color      = driveMins < 20 ? 'var(--green)' : driveMins < 45 ? 'var(--amber)' : 'var(--red)';
+  const driveH     = Math.floor(driveMins/60), driveM = driveMins % 60;
+  const driveStr   = driveH > 0 ? `${driveH}h ${driveM}m` : `${driveM}m`;
+  const arriveStr  = new Date(Date.now() + driveMins * 60000).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12: true });
+
+  alertData.leaveAtMs = leaveAtMs;
+  alertData.sendAtMs  = leaveAtMs;
+
+  el.innerHTML = `
+    <div style="text-align:center;margin:4px 0 12px">
+      <div style="font-size:11px;color:var(--green);font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">🛬 Landed ${agoStr}</div>
+      <div style="font-size:38px;font-weight:900;letter-spacing:-2px;line-height:1;color:${color}">Leave now</div>
+      <div style="font-size:12px;color:var(--t2);margin-top:4px">Arrive at ${f.arr.iata} by ${arriveStr}</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div class="det" style="flex:1;text-align:center">
+        <div class="det-label">Drive time</div>
+        <div class="det-val">${driveStr}</div>
+      </div>
+      <div class="det" style="flex:1;text-align:center">
+        <div class="det-label">Landed</div>
+        <div class="det-val">${agoStr}</div>
+      </div>
+    </div>
+    <button class="btn-alert" onclick="openDirections()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+      Get Directions to ${f.arr.iata}
+    </button>`;
 }
 
 function openDirections() {

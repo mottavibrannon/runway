@@ -99,11 +99,19 @@ function mapStatus(faStatus) {
 }
 
 function formatFlightAwareFlight(f, pos) {
+  // progress_percent is more reliable than the status string —
+  // FA sometimes returns "Scheduled" even after a flight completes
+  const status = f.progress_percent === 100
+    ? 'landed'
+    : f.progress_percent > 0
+      ? 'active'
+      : mapStatus(f.status);
+
   return {
     flightNumber: f.ident_iata || f.ident || 'Unknown',
     airline:      AIRLINE_NAMES[f.operator] || f.operator || 'Unknown',
     aircraft:     f.aircraft_type || null,
-    status:       mapStatus(f.status),
+    status,
     dep: {
       iata:          f.origin?.code_iata || f.origin?.code,
       name:          f.origin?.name      || '',
@@ -154,9 +162,35 @@ async function fetchFromFlightAware(ident) {
   const flights = json.flights;
   if (!flights?.length) return null;
 
-  // Prefer the in-flight one; fall back to most recent (array is newest-first)
-  const active = flights.find(f => f.progress_percent > 0 && f.progress_percent < 100);
-  const chosen = active || flights[0];
+  // ── Relevance hierarchy ────────────────────────────────────────────────────
+  // 1. Currently airborne (progress 1-99%)
+  // 2. Recently landed    (arrived within the last 3 hours)
+  // 3. Departing soon     (scheduled departure within the next 6 hours)
+  // 4. Fall back to most recent (FlightAware returns newest-first)
+  const RECENCY_MS  = 3 * 3600000; // 3 h post-landing window
+  const DEP_SOON_MS = 6 * 3600000; // 6 h pre-departure window
+  const nowMs = Date.now();
+
+  const airborne = flights.find(f =>
+    f.progress_percent > 0 && f.progress_percent < 100
+  );
+
+  const recentLanded = flights.find(f => {
+    // FlightAware uses 'Arrived', 'Landed', or sometimes just completes at 100%
+    const rawStatus = f.status?.toLowerCase() || '';
+    const isArrived = rawStatus.includes('arrived') || rawStatus.includes('landed') || f.progress_percent === 100;
+    if (!isArrived) return false;
+    const landedAt = new Date(f.actual_in || f.estimated_in || f.scheduled_in).getTime();
+    return !isNaN(landedAt) && nowMs - landedAt <= RECENCY_MS;
+  });
+
+  const departingSoon = flights.find(f => {
+    if (!f.status?.toLowerCase().includes('scheduled')) return false;
+    const depAt = new Date(f.scheduled_out).getTime();
+    return !isNaN(depAt) && depAt > nowMs && depAt - nowMs <= DEP_SOON_MS;
+  });
+
+  const chosen = airborne || recentLanded || departingSoon || flights[0];
 
   console.log(`[FlightAware] ${chosen.ident_iata} | status="${chosen.status}" | progress=${chosen.progress_percent}% | fa_id=${chosen.fa_flight_id}`);
 
